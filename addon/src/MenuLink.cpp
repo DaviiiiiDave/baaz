@@ -12,7 +12,7 @@ namespace Baaz {
 // override combinations (23040) and model view options (9472). The numbers do not depend on the
 // language. 1027, 1293 and 20754 are static commands that match by name only; they stay in the
 // table, so they are never offered, which is the safe side. Sorted for binary search.
-static const unsigned kPlaceholderCommands[] = {
+static constexpr unsigned kPlaceholderCommands[] = {
     514, 522, 542, 550, 551, 778, 787, 794, 1027, 1293, 1549, 1551,
     1802, 1803, 2055, 2563, 2578, 2817, 2825, 2826, 2832, 2833, 2834, 2835,
     2836, 2841, 2848, 2851, 3331, 3332, 3333, 3356, 5901, 6409, 6658, 6660,
@@ -22,6 +22,9 @@ static const unsigned kPlaceholderCommands[] = {
     20754, 20994, 20995, 21250, 21251, 21506, 21507, 21768, 22018, 22019, 22530, 22785,
     23040
 };
+
+static_assert(std::is_sorted(std::begin(kPlaceholderCommands), std::end(kPlaceholderCommands)),
+              "kPlaceholderCommands is searched with binary_search");
 
 static const wchar_t* const kPathSeparator = L" \u203a ";
 
@@ -140,6 +143,9 @@ private:
     }
 
     void LinkRegion(size_t first, size_t last, size_t liveFirst, size_t liveCount) {
+        // The first live segment is the list: the real graphic override popup holds a segment
+        // after it (566) that must stay unlinked. This relies on a current export listing every
+        // static segment; a stale one is caught by the staleness check.
         if (first == last && IsLonePlaceholder(m_catalogueSegments[first])) {
             LinkList(m_catalogueSegments[first], m_liveSegments[liveFirst]);
             return;

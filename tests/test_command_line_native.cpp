@@ -370,6 +370,25 @@ void TestAmbiguousInputIsEmpty() {
     std::cout << "[PASS] TestAmbiguousInputIsEmpty\n";
 }
 
+void TestNameLengthLimit() {
+    const std::string atLimit(512, 'a');
+    const std::string tooLong(513, 'a');
+    const std::string item = "<Item command=\"1-0x0-0x0\" comment=\"";
+    assert(SchemeReader::ReadFloorPlanMenuBar(OneMenu(item + atLimit + "\"/>")).size() == 1);
+    assert(SchemeReader::ReadFloorPlanMenuBar(OneMenu(item + tooLong + "\"/>")).empty());
+    // Access key marks are not part of the name
+    assert(SchemeReader::ReadFloorPlanMenuBar(OneMenu(item + "&amp;" + atLimit + "\"/>")).size() == 1);
+
+    const std::string title = "<Menu ID=\"M\" title=\"";
+    assert(SchemeReader::ReadFloorPlanMenuBar(FloorPlanBar(title + atLimit + "\"/>")).size() == 1);
+    assert(SchemeReader::ReadFloorPlanMenuBar(FloorPlanBar(title + tooLong + "\"/>")).empty());
+    // One long title deeper down empties the whole result
+    const std::string inner = "<Menu ID=\"M\" title=\"M\"><PopupItem><Menu ID=\"S\" title=\"";
+    assert(SchemeReader::ReadFloorPlanMenuBar(FloorPlanBar(inner + atLimit + "\"/></PopupItem></Menu>")).size() == 1);
+    assert(SchemeReader::ReadFloorPlanMenuBar(FloorPlanBar(inner + tooLong + "\"/></PopupItem></Menu>")).empty());
+    std::cout << "[PASS] TestNameLengthLimit\n";
+}
+
 static const int P = -1;  // popup
 static const int S = -2;  // separator
 static const unsigned kAddOnPlaceholder = 1803;
@@ -863,6 +882,72 @@ void TestDynamicItemIsNeverOffered() {
     std::cout << "[PASS] TestDynamicItemIsNeverOffered\n";
 }
 
+struct ExpectedLink {
+    const wchar_t* name;
+    const wchar_t* menuPath;
+    unsigned liveId;
+    std::vector<int> position;
+};
+
+// Nested popups are unreadable here, so only the items of the two menus are linked
+void TestAnsichtExactLinkSet() {
+    auto bar = AnsichtBar();
+    FakeMenu live = AnsichtFake(kMeasuredAnsicht);
+    auto commands = MenuLink::Link(bar, live, {});
+    const ExpectedLink expected[] = {
+        { L"Neu", L"Ablage", 77, { 0, 0 } },
+        { L"Transparentpause", L"Ansicht", 1233, { 1, 2 } },
+        { L"Konstruktionsraster darstellen", L"Ansicht", 256, { 1, 3 } },
+        { L"Darstellung der Bearbeitungsebene", L"Ansicht", 391, { 1, 4 } },
+        { L"Anzeige Ursprung", L"Ansicht", 393, { 1, 7 } },
+        { L"Lineal", L"Ansicht", 255, { 1, 9 } },
+        { L"Hilfslinien", L"Ansicht", 265, { 1, 10 } },
+        { L"Entry 1", L"Ansicht", 415, { 1, 13 } },
+        { L"Entry 2", L"Ansicht", 416, { 1, 14 } },
+        { L"Entry 3", L"Ansicht", 371, { 1, 15 } },
+        { L"Entry 4", L"Ansicht", 369, { 1, 16 } },
+        { L"Entry 5", L"Ansicht", 261, { 1, 18 } },
+        { L"Orbit", L"Ansicht", 1180, { 1, 25 } },
+        { L"3D Rundgang", L"Ansicht", 1176, { 1, 26 } },
+    };
+    assert(commands.size() == std::size(expected));
+    for (size_t i = 0; i < commands.size(); ++i) {
+        assert(commands[i].name == expected[i].name);
+        assert(commands[i].menuPath == expected[i].menuPath);
+        assert(commands[i].liveId == expected[i].liveId);
+        assert(commands[i].position == expected[i].position);
+        assert(commands[i].enabled);
+    }
+    std::cout << "[PASS] TestAnsichtExactLinkSet\n";
+}
+
+void TestSameNameKeepsItsOwnPosition() {
+    std::vector<MenuNode> bar = { PopupNode(L"First", { ItemNode(L"Settings", 11), ItemNode(L"Settings", 12) }),
+                                  PopupNode(L"Second", { ItemNode(L"Settings", 13) }) };
+    FakeMenu live({ L"First", L"Second" });
+    live.Set({ 0 }, { 10, 20 });
+    live.Set({ 1 }, { 30 });
+    auto commands = MenuLink::Link(bar, live, {});
+    assert(commands.size() == 3);
+    assert((LinkedIds(commands) == std::vector<unsigned>{ 10, 20, 30 }));
+    assert((commands[0].position == std::vector<int>{ 0, 0 }) && commands[0].menuPath == L"First");
+    assert((commands[1].position == std::vector<int>{ 0, 1 }) && commands[1].menuPath == L"First");
+    assert((commands[2].position == std::vector<int>{ 1, 0 }) && commands[2].menuPath == L"Second");
+    std::cout << "[PASS] TestSameNameKeepsItsOwnPosition\n";
+}
+
+// The real graphic override popup is [408, S, 1840..1849, S, 566, S, 407] and 566 must stay
+// unlinked, so the first live segment of the region is the list. This assumes a current export
+// lists every static segment; a stale export is caught by the staleness check.
+void TestListRegionTakesFirstLiveSegment() {
+    const std::vector<DynamicList> lists = { { kGraphicOverridePlaceholder, Wide({ L"X", L"Y", L"Z" }) } };
+    auto commands = LinkOne(ListMenu(), { 1, S, 10, S, 11, 12, S, 2 }, lists);
+    assert((LinkedNames(commands) == std::vector<std::wstring>{ L"A", L"X", L"B" }));
+    assert((LinkedIds(commands) == std::vector<unsigned>{ 1, 10, 2 }));
+    assert(!HasLiveId(commands, 11) && !HasLiveId(commands, 12));
+    std::cout << "[PASS] TestListRegionTakesFirstLiveSegment\n";
+}
+
 static FILETIME FileTimeFrom(unsigned long long ticks) {
     FILETIME time;
     time.dwLowDateTime = static_cast<DWORD>(ticks & 0xFFFFFFFFull);
@@ -898,6 +983,7 @@ int main() {
     TestPicksBarByGuidNotOrder();
     TestDuplicateBarGuidIsEmpty();
     TestAmbiguousInputIsEmpty();
+    TestNameLengthLimit();
     TestLinksRuler();
     TestLinksAreOrderedByPosition();
     TestAnchorsFromSegmentEnd();
@@ -924,6 +1010,9 @@ int main() {
     TestPlaceholderSegmentGoneLinksNothing();
     TestPlaceholderRegionSizeMismatch();
     TestDynamicItemIsNeverOffered();
+    TestAnsichtExactLinkSet();
+    TestSameNameKeepsItsOwnPosition();
+    TestListRegionTakesFirstLiveSegment();
     TestStaleExport();
     std::cout << "All command line tests passed\n";
     return 0;
