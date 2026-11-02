@@ -13,6 +13,10 @@ static const wchar_t* const kFloorPlanBarGuid = L"2085E4D3-5694-4BB9-ACAC-3AED5B
 // Real schemes nest menus about six deep; the limit stops reference cycles and hostile files.
 static const int kMaxMenuDepth = 16;
 static const size_t kMaxXmlDepth = 64;
+// Menus can reference each other, so a few KB of XML can expand into billions of nodes.
+// A real scheme builds about 1300.
+static const size_t kMaxMenuNodes = 100000;
+static const size_t kMaxInputBytes = 8 * 1024 * 1024;
 
 namespace {
 
@@ -29,9 +33,12 @@ struct XmlElement {
 
 using MenuDefinitions = std::map<std::wstring, const XmlElement*>;
 
-} // namespace
+struct BuildContext {
+    const MenuDefinitions& definitions;
+    size_t nodes = 0;
+};
 
-// ---- UTF-8 to UTF-16 ---------------------------------------------------------
+} // namespace
 
 static bool ToWide(const std::string& utf8, std::wstring& out) {
     size_t start = utf8.compare(0, 3, "\xEF\xBB\xBF") == 0 ? 3 : 0;
@@ -44,8 +51,6 @@ static bool ToWide(const std::string& utf8, std::wstring& out) {
     out.resize(static_cast<size_t>(count));
     return MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, bytes, static_cast<int>(length), out.data(), count) == count;
 }
-
-// ---- Entities ----------------------------------------------------------------
 
 // Value of a decimal digit, or of a hexadecimal one when hex is set; -1 for anything else
 static int DigitValue(wchar_t c, bool hex) {
@@ -112,7 +117,12 @@ static bool DecodeEntities(const std::wstring& raw, std::wstring& out) {
     return true;
 }
 
-// ---- XML tokenizer and tree --------------------------------------------------
+static const std::wstring* Attribute(const XmlElement& element, const wchar_t* name) {
+    for (const XmlAttribute& attribute : element.attributes) {
+        if (attribute.name == name) return &attribute.value;
+    }
+    return nullptr;
+}
 
 namespace {
 
@@ -216,7 +226,8 @@ private:
                 return true;
             }
             XmlAttribute attribute;
-            if (!ParseAttribute(attribute)) return false;
+            // Two values for one name: which one is meant?
+            if (!ParseAttribute(attribute) || Attribute(element, attribute.name.c_str()) != nullptr) return false;
             element.attributes.push_back(std::move(attribute));
         }
     }
@@ -240,15 +251,6 @@ private:
 
 } // namespace
 
-// ---- Menu tree ---------------------------------------------------------------
-
-static const std::wstring* Attribute(const XmlElement& element, const wchar_t* name) {
-    for (const XmlAttribute& attribute : element.attributes) {
-        if (attribute.name == name) return &attribute.value;
-    }
-    return nullptr;
-}
-
 static bool CollectDefinitions(const XmlElement& element, MenuDefinitions& definitions) {
     const std::wstring* id = Attribute(element, L"ID");
     if (element.name == L"Menu" && id != nullptr && !definitions.emplace(*id, &element).second) return false;
@@ -258,13 +260,17 @@ static bool CollectDefinitions(const XmlElement& element, MenuDefinitions& defin
     return true;
 }
 
-static const XmlElement* FindFloorPlanBar(const XmlElement& element) {
+// Fails if a second bar carries the GUID: there is no telling which one is in use
+static bool FindFloorPlanBar(const XmlElement& element, const XmlElement*& bar) {
     const std::wstring* guid = Attribute(element, L"menubarguid");
-    if (element.name == L"MenuBar" && guid != nullptr && *guid == kFloorPlanBarGuid) return &element;
-    for (const XmlElement& child : element.children) {
-        if (const XmlElement* bar = FindFloorPlanBar(child)) return bar;
+    if (element.name == L"MenuBar" && guid != nullptr && *guid == kFloorPlanBarGuid) {
+        if (bar != nullptr) return false;
+        bar = &element;
     }
-    return nullptr;
+    for (const XmlElement& child : element.children) {
+        if (!FindFloorPlanBar(child, bar)) return false;
+    }
+    return true;
 }
 
 // "&&" is a literal ampersand, a single "&" marks the access key
@@ -281,17 +287,30 @@ static std::wstring CleanName(const std::wstring& raw) {
     return name;
 }
 
-// The number before the first '-' of command="<n>-<mdid1>-<mdid2>"
-static bool ParseCommandNumber(const std::wstring& command, unsigned& number) {
-    size_t digits = command.find_first_not_of(L"0123456789");
-    if (digits == 0 || digits == std::wstring::npos || command[digits] != L'-') return false;
+// "0x" followed by at least one hexadecimal digit
+static bool IsHexLiteral(const std::wstring& part) {
+    return part.size() > 2 && part.compare(0, 2, L"0x") == 0 &&
+           part.find_first_not_of(L"0123456789abcdefABCDEF", 2) == std::wstring::npos;
+}
+
+static bool ParseDecimal(const std::wstring& digits, unsigned& number) {
+    if (digits.empty() || digits.find_first_not_of(L"0123456789") != std::wstring::npos) return false;
     unsigned long long value = 0;
-    for (size_t i = 0; i < digits; ++i) {
-        value = value * 10 + static_cast<unsigned long long>(command[i] - L'0');
+    for (wchar_t digit : digits) {
+        value = value * 10 + static_cast<unsigned long long>(digit - L'0');
         if (value > UINT_MAX) return false;
     }
     number = static_cast<unsigned>(value);
     return true;
+}
+
+// command="<n>-<mdid1>-<mdid2>" with decimal n and two hexadecimal MDID parts; returns n
+static bool ParseCommandNumber(const std::wstring& command, unsigned& number) {
+    size_t first = command.find(L'-');
+    size_t second = first == std::wstring::npos ? first : command.find(L'-', first + 1);
+    if (second == std::wstring::npos || command.find(L'-', second + 1) != std::wstring::npos) return false;
+    return IsHexLiteral(command.substr(first + 1, second - first - 1)) && IsHexLiteral(command.substr(second + 1)) &&
+           ParseDecimal(command.substr(0, first), number);
 }
 
 static bool BuildItem(const XmlElement& element, MenuNode& node) {
@@ -303,21 +322,27 @@ static bool BuildItem(const XmlElement& element, MenuNode& node) {
     return ParseCommandNumber(*command, node.commandNumber);
 }
 
-static bool BuildPopup(const XmlElement& menu, const MenuDefinitions& definitions, int depth, MenuNode& node);
+static bool BuildPopup(const XmlElement& menu, BuildContext& context, int depth, MenuNode& node);
 
 // <PopupItem> holds exactly one <Menu>, defined inline or by IDREF
-static bool BuildPopupItem(const XmlElement& element, const MenuDefinitions& definitions, int depth, MenuNode& node) {
+static bool BuildPopupItem(const XmlElement& element, BuildContext& context, int depth, MenuNode& node) {
     if (element.children.size() != 1 || element.children[0].name != L"Menu") return false;
-    return BuildPopup(element.children[0], definitions, depth, node);
+    return BuildPopup(element.children[0], context, depth, node);
 }
 
-static bool BuildEntry(const XmlElement& element, const MenuDefinitions& definitions, int depth, MenuNode& node) {
+static bool CountNode(BuildContext& context) {
+    return ++context.nodes <= kMaxMenuNodes;
+}
+
+static bool BuildEntry(const XmlElement& element, BuildContext& context, int depth, MenuNode& node) {
+    // Only a popup has children; on an item or separator they would be dropped silently
+    if (!CountNode(context) || (element.name != L"PopupItem" && !element.children.empty())) return false;
     if (element.name == L"Item") return BuildItem(element, node);
     if (element.name == L"Separator") {
         node.type = MenuNodeType::Separator;
         return true;
     }
-    if (element.name == L"PopupItem") return BuildPopupItem(element, definitions, depth, node);
+    if (element.name == L"PopupItem") return BuildPopupItem(element, context, depth, node);
     // An unknown entry would shift the positions the linking relies on
     return false;
 }
@@ -325,42 +350,50 @@ static bool BuildEntry(const XmlElement& element, const MenuDefinitions& definit
 static const XmlElement* ResolveMenu(const XmlElement& menu, const MenuDefinitions& definitions) {
     const std::wstring* reference = Attribute(menu, L"IDREF");
     if (reference == nullptr) return &menu;
+    // A reference with content of its own would hide that content
+    if (!menu.children.empty()) return nullptr;
     auto found = definitions.find(*reference);
     return found == definitions.end() ? nullptr : found->second;
 }
 
-static bool BuildPopup(const XmlElement& menu, const MenuDefinitions& definitions, int depth, MenuNode& node) {
+static bool BuildPopup(const XmlElement& menu, BuildContext& context, int depth, MenuNode& node) {
     if (depth > kMaxMenuDepth) return false;
-    const XmlElement* definition = ResolveMenu(menu, definitions);
+    const XmlElement* definition = ResolveMenu(menu, context.definitions);
     const std::wstring* title = definition == nullptr ? nullptr : Attribute(*definition, L"title");
     if (title == nullptr) return false;
     node.type = MenuNodeType::Popup;
     node.name = CleanName(*title);
     for (const XmlElement& child : definition->children) {
         MenuNode entry;
-        if (!BuildEntry(child, definitions, depth + 1, entry)) return false;
+        if (!BuildEntry(child, context, depth + 1, entry)) return false;
         node.children.push_back(std::move(entry));
     }
     return true;
 }
 
-static bool BuildMenuBar(const XmlElement& bar, const MenuDefinitions& definitions, std::vector<MenuNode>& menus) {
+static bool BuildMenuBar(const XmlElement& bar, BuildContext& context, std::vector<MenuNode>& menus) {
     for (const XmlElement& child : bar.children) {
         MenuNode menu;
-        if (child.name != L"Menu" || !BuildPopup(child, definitions, 1, menu)) return false;
+        if (!CountNode(context) || child.name != L"Menu" || !BuildPopup(child, context, 1, menu)) return false;
         menus.push_back(std::move(menu));
     }
     return true;
 }
 
-std::vector<MenuNode> SchemeReader::ReadFloorPlanMenuBar(const std::string& utf8Xml) {
+static bool ParseDocument(const std::string& utf8Xml, XmlElement& root, MenuDefinitions& definitions) {
     std::wstring text;
+    return utf8Xml.size() <= kMaxInputBytes && ToWide(utf8Xml, text) && XmlParser(text).Parse(root) &&
+           CollectDefinitions(root, definitions);
+}
+
+std::vector<MenuNode> SchemeReader::ReadFloorPlanMenuBar(const std::string& utf8Xml) {
     XmlElement root;
     MenuDefinitions definitions;
+    const XmlElement* bar = nullptr;
     std::vector<MenuNode> menus;
-    if (!ToWide(utf8Xml, text) || !XmlParser(text).Parse(root) || !CollectDefinitions(root, definitions)) return {};
-    const XmlElement* bar = FindFloorPlanBar(root);
-    if (bar == nullptr || !BuildMenuBar(*bar, definitions, menus)) return {};
+    if (!ParseDocument(utf8Xml, root, definitions) || !FindFloorPlanBar(root, bar) || bar == nullptr) return {};
+    BuildContext context{ definitions };
+    if (!BuildMenuBar(*bar, context, menus)) return {};
     return menus;
 }
 

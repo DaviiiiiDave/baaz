@@ -40,11 +40,20 @@ static bool SameTree(const std::vector<MenuNode>& a, const std::vector<MenuNode>
     return true;
 }
 
+static const char* const kFloorPlanGuid = "2085E4D3-5694-4BB9-ACAC-3AED5BE50091";
+static const char* const kTextGuid = "2CAC215F-221C-420F-AAEB-8462A659B8D9";
+
+static std::string Scheme(const std::string& contents) {
+    return "<Scheme><GlobalSettings><CommandLayout>" + contents + "</CommandLayout></GlobalSettings></Scheme>";
+}
+
+static std::string BarWithGuid(const char* guid, const std::string& menus) {
+    return std::string("<MenuBar ID=\"B\" menubarguid=\"") + guid + "\" name=\"x\">" + menus + "</MenuBar>";
+}
+
 // A complete scheme with one menu bar, so edge cases only spell out the menus
 static std::string FloorPlanBar(const std::string& menus) {
-    return "<Scheme><GlobalSettings><CommandLayout>"
-           "<MenuBar ID=\"B\" menubarguid=\"2085E4D3-5694-4BB9-ACAC-3AED5BE50091\" name=\"x\">" +
-           menus + "</MenuBar></CommandLayout></GlobalSettings></Scheme>";
+    return Scheme(BarWithGuid(kFloorPlanGuid, menus));
 }
 
 void TestReadsFloorPlanBarOnly() {
@@ -174,6 +183,189 @@ void TestReferenceCycleIsEmpty() {
     std::cout << "[PASS] TestReferenceCycleIsEmpty\n";
 }
 
+static const std::string kValidItem = "<Item command=\"1-0x0-0x0\" comment=\"x\"/>";
+static const std::string kValidMenuBefore = "<Menu ID=\"V1\" title=\"V1\">" + kValidItem + "</Menu>";
+static const std::string kValidMenuAfter = "<Menu ID=\"V2\" title=\"V2\">" + kValidItem + "</Menu>";
+
+// A popup nested in a menu, with the construct between valid items
+static std::string InsideNestedPopup(const std::string& construct) {
+    return "<Menu ID=\"P\" title=\"P\">" + kValidItem + "<PopupItem><Menu ID=\"N\" title=\"N\">" + kValidItem +
+           construct + kValidItem + "</Menu></PopupItem></Menu>";
+}
+
+static std::wstring Dump(const MenuNode& node) {
+    if (node.type == MenuNodeType::Separator) return L"S";
+    if (node.type == MenuNodeType::Item) return L"I:" + node.name + L"#" + std::to_wstring(node.commandNumber);
+    std::wstring text = L"P:" + node.name + L"[";
+    for (size_t i = 0; i < node.children.size(); ++i) {
+        if (i > 0) text += L",";
+        text += Dump(node.children[i]);
+    }
+    return text + L"]";
+}
+
+// One bad construct as a child of the menu bar, and as an entry of a menu
+struct BadConstruct {
+    const char* asBarChild;
+    const char* asEntry;
+};
+
+void TestRejectionNeverYieldsPartialTree() {
+    const BadConstruct constructs[] = {
+        { "<PopupItem/>", "<PopupItem/>" },
+        { "<PopupItem><Menu ID=\"a\" title=\"a\"/><Menu ID=\"b\" title=\"b\"/></PopupItem>",
+          "<PopupItem><Menu ID=\"a\" title=\"a\"/><Menu ID=\"b\" title=\"b\"/></PopupItem>" },
+        { "<PopupItem><Item command=\"1-0x0-0x0\" comment=\"x\"/></PopupItem>",
+          "<PopupItem><Item command=\"1-0x0-0x0\" comment=\"x\"/></PopupItem>" },
+        { "<Item command=\"x-0x0-0x0\" comment=\"a\"/>", "<Item command=\"x-0x0-0x0\" comment=\"a\"/>" },
+        { "<Item command=\"99999999999-0x0-0x0\" comment=\"a\"/>", "<Item command=\"99999999999-0x0-0x0\" comment=\"a\"/>" },
+        { "<Menu ID=\"Z\"/>", "<PopupItem><Menu ID=\"Z\"/></PopupItem>" },
+        { "<Separator/>", "<Bogus/>" },
+        { "<Menu IDREF=\"Nowhere\"/>", "<PopupItem><Menu IDREF=\"Nowhere\"/></PopupItem>" },
+    };
+    // The same documents without a bad construct read fine, so only the construct can empty them
+    assert(SchemeReader::ReadFloorPlanMenuBar(FloorPlanBar(kValidMenuBefore + kValidMenuAfter)).size() == 2);
+    auto control = SchemeReader::ReadFloorPlanMenuBar(FloorPlanBar(kValidMenuBefore + InsideNestedPopup("") + kValidMenuAfter));
+    assert(control.size() == 3);
+    assert(Dump(control[1]) == L"P:P[I:x#1,P:N[I:x#1,I:x#1]]");
+
+    for (const BadConstruct& construct : constructs) {
+        assert(SchemeReader::ReadFloorPlanMenuBar(
+            FloorPlanBar(kValidMenuBefore + construct.asBarChild + kValidMenuAfter)).empty());
+        assert(SchemeReader::ReadFloorPlanMenuBar(
+            FloorPlanBar(kValidMenuBefore + InsideNestedPopup(construct.asEntry) + kValidMenuAfter)).empty());
+    }
+    std::cout << "[PASS] TestRejectionNeverYieldsPartialTree\n";
+}
+
+// Menus M0..M(count-1), each holding the next one by IDREF; the last holds an item
+static std::string MenuChain(int count) {
+    std::string definitions;
+    for (int i = 0; i < count; ++i) {
+        std::string id = "M" + std::to_string(i);
+        std::string inner = i + 1 < count ? "<PopupItem><Menu IDREF=\"M" + std::to_string(i + 1) + "\"/></PopupItem>" : kValidItem;
+        definitions += "<Menu ID=\"" + id + "\" title=\"" + id + "\">" + inner + "</Menu>";
+    }
+    return Scheme(definitions + BarWithGuid(kFloorPlanGuid, "<Menu IDREF=\"M0\"/>"));
+}
+
+void TestDepthLimitNotCycle() {
+    // kMaxMenuDepth is 16 in SchemeReader.cpp: a chain of 16 menus is allowed, 17 is not
+    assert(SchemeReader::ReadFloorPlanMenuBar(MenuChain(1)).size() == 1);
+    assert(SchemeReader::ReadFloorPlanMenuBar(MenuChain(16)).size() == 1);
+    assert(SchemeReader::ReadFloorPlanMenuBar(MenuChain(17)).empty());
+    std::cout << "[PASS] TestDepthLimitNotCycle\n";
+}
+
+static std::string MenuWithSeparators(size_t count) {
+    std::string menu = "<Menu ID=\"M\" title=\"M\">";
+    for (size_t i = 0; i < count; ++i) menu += "<Separator/>";
+    return FloorPlanBar(menu + "</Menu>");
+}
+
+void TestNodeBudgetStopsExpansion() {
+    // 15 menus with three links each to the next: 3^14 nodes if expanded, a few KB of XML
+    std::string definitions;
+    for (int i = 0; i < 15; ++i) {
+        std::string id = "M" + std::to_string(i);
+        std::string link = "<PopupItem><Menu IDREF=\"M" + std::to_string(i + 1) + "\"/></PopupItem>";
+        definitions += "<Menu ID=\"" + id + "\" title=\"" + id + "\">" + (i < 14 ? link + link + link : kValidItem) + "</Menu>";
+    }
+    assert(SchemeReader::ReadFloorPlanMenuBar(
+        Scheme(definitions + BarWithGuid(kFloorPlanGuid, "<Menu IDREF=\"M0\"/>"))).empty());
+
+    // kMaxMenuNodes is 100000 in SchemeReader.cpp and counts the menu itself
+    assert(SchemeReader::ReadFloorPlanMenuBar(MenuWithSeparators(99999)).size() == 1);
+    assert(SchemeReader::ReadFloorPlanMenuBar(MenuWithSeparators(100000)).empty());
+    std::cout << "[PASS] TestNodeBudgetStopsExpansion\n";
+}
+
+void TestInputSizeLimit() {
+    // kMaxInputBytes is 8 MiB in SchemeReader.cpp; trailing white space is ignored by the reader
+    std::string document = FloorPlanBar("<Menu ID=\"M\" title=\"M\"/>");
+    const size_t limit = 8u * 1024u * 1024u;
+    assert(SchemeReader::ReadFloorPlanMenuBar(document + std::string(limit - document.size(), ' ')).size() == 1);
+    assert(SchemeReader::ReadFloorPlanMenuBar(document + std::string(limit - document.size() + 1, ' ')).empty());
+    std::cout << "[PASS] TestInputSizeLimit\n";
+}
+
+void TestExactTreeShape() {
+    auto menus = SchemeReader::ReadFloorPlanMenuBar(Scheme(
+        "<Menu ID=\"C\" title=\"C\"><Item command=\"3-0x0-0x0\" comment=\"z\"/></Menu>" +
+        BarWithGuid(kFloorPlanGuid,
+            "<Menu ID=\"A\" title=\"A\">"
+            "<Item command=\"1-0x0-0x0\" comment=\"x\"/>"
+            "<Separator/>"
+            "<PopupItem><Menu ID=\"B\" title=\"B\"><Item command=\"2-0x0-0x0\" comment=\"y\"/></Menu></PopupItem>"
+            "<PopupItem><Menu IDREF=\"C\"/></PopupItem>"
+            "<Item command=\"4-0x0-0x0\" comment=\"w\"/>"
+            "<PopupItem><Menu ID=\"D\" title=\"D\"><Separator/></Menu></PopupItem>"
+            "</Menu>"
+            "<Menu ID=\"E\" title=\"E\"/>")));
+    assert(menus.size() == 2);
+    assert(Dump(menus[0]) == L"P:A[I:x#1,S,P:B[I:y#2],P:C[I:z#3],I:w#4,P:D[S]]");
+    assert(Dump(menus[1]) == L"P:E[]");
+
+    auto fixture = SchemeReader::ReadFloorPlanMenuBar(ReadFixture());
+    assert(fixture.size() == 2);
+    assert(fixture[0].children.size() == 14);
+    assert(fixture[1].children.size() == 4);
+    assert(Dump(fixture[1]) ==
+           L"P:Dokumentation["
+           L"P:Modelldarstellung[I:Modelldarstellung erstellen...#1550,S,I:Keine Modelldarstellungs-Kombinationen#9472],"
+           L"P:Grafische \u00dcberschreibung[I:Grafische \u00dcberschreibungen...#1564,S,"
+           L"I:Keine grafischen \u00dcberschreibungen#23040,S,I:Grafische \u00dcberschreibungsregel...#1563],"
+           L"S,I:Grundriss-Schnittebene...#6407]");
+    std::cout << "[PASS] TestExactTreeShape\n";
+}
+
+void TestPicksBarByGuidNotOrder() {
+    auto menus = SchemeReader::ReadFloorPlanMenuBar(Scheme(
+        BarWithGuid(kTextGuid, "<Menu ID=\"T\" title=\"Text-Only\"/>") +
+        BarWithGuid(kFloorPlanGuid, "<Menu ID=\"F\" title=\"Floor\"/>")));
+    assert((Names(menus) == std::vector<std::wstring>{ L"Floor" }));
+    std::cout << "[PASS] TestPicksBarByGuidNotOrder\n";
+}
+
+void TestDuplicateBarGuidIsEmpty() {
+    assert(SchemeReader::ReadFloorPlanMenuBar(Scheme(
+        BarWithGuid(kFloorPlanGuid, "<Menu ID=\"F1\" title=\"One\"/>") +
+        BarWithGuid(kFloorPlanGuid, "<Menu ID=\"F2\" title=\"Two\"/>"))).empty());
+    std::cout << "[PASS] TestDuplicateBarGuidIsEmpty\n";
+}
+
+static std::string OneMenu(const std::string& entries) {
+    return FloorPlanBar("<Menu ID=\"M\" title=\"M\">" + entries + "</Menu>");
+}
+
+void TestAmbiguousInputIsEmpty() {
+    assert(SchemeReader::ReadFloorPlanMenuBar(OneMenu(kValidItem + "<Separator/>")).size() == 1);
+
+    // A repeated attribute: which value is meant?
+    assert(SchemeReader::ReadFloorPlanMenuBar(OneMenu("<Item command=\"1-0x0-0x0\" comment=\"A\" comment=\"B\"/>")).empty());
+    assert(SchemeReader::ReadFloorPlanMenuBar(FloorPlanBar("<Menu ID=\"M\" title=\"a\" title=\"b\"/>")).empty());
+
+    // Children of a leaf entry would be dropped silently
+    assert(SchemeReader::ReadFloorPlanMenuBar(OneMenu(
+        "<Item command=\"1-0x0-0x0\" comment=\"A\"><Item command=\"2-0x0-0x0\" comment=\"B\"/></Item>")).empty());
+    assert(SchemeReader::ReadFloorPlanMenuBar(OneMenu("<Separator><Separator/></Separator>")).empty());
+
+    // A reference that also has content would hide that content
+    assert(SchemeReader::ReadFloorPlanMenuBar(FloorPlanBar("<Menu ID=\"M\" title=\"M\"/><Menu IDREF=\"M\"/>")).size() == 2);
+    assert(SchemeReader::ReadFloorPlanMenuBar(FloorPlanBar("<Menu ID=\"M\" title=\"M\"/><Menu IDREF=\"M\">" + kValidItem + "</Menu>")).empty());
+
+    // command is <decimal>-0x<hex>-0x<hex> and nothing else
+    const char* badCommands[] = { "12-garbage", "12-0x0", "12", "12-0x0-0x0-0x0", "12-0x-0x0",
+                                  "12-0xZZ-0x0", "12-0x0-0x0 ", "-0x0-0x0", "12-x0-0x0" };
+    for (const char* command : badCommands) {
+        assert(SchemeReader::ReadFloorPlanMenuBar(
+            OneMenu(std::string("<Item command=\"") + command + "\" comment=\"A\"/>")).empty());
+    }
+    auto good = SchemeReader::ReadFloorPlanMenuBar(OneMenu("<Item command=\"12-0x47732F64-0xd1c74938\" comment=\"A\"/>"));
+    assert(good.size() == 1 && good[0].children.at(0).commandNumber == 12);
+    std::cout << "[PASS] TestAmbiguousInputIsEmpty\n";
+}
+
 int main() {
     TestReadsFloorPlanBarOnly();
     TestRulerPosition();
@@ -183,6 +375,14 @@ int main() {
     TestBomCommentsAndCrlf();
     TestMalformedIsEmpty();
     TestReferenceCycleIsEmpty();
+    TestRejectionNeverYieldsPartialTree();
+    TestDepthLimitNotCycle();
+    TestNodeBudgetStopsExpansion();
+    TestInputSizeLimit();
+    TestExactTreeShape();
+    TestPicksBarByGuidNotOrder();
+    TestDuplicateBarGuidIsEmpty();
+    TestAmbiguousInputIsEmpty();
     std::cout << "All command line tests passed\n";
     return 0;
 }
