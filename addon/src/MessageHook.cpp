@@ -33,6 +33,16 @@ static void SendWandSpace(bool keyUp) {
     SendInput(1, &input, sizeof(INPUT));
 }
 
+// Archicad 29 takes Space from its own key message, so the click Space modifies
+// has to arrive after it; the real click is withheld and replayed behind Space.
+static void SendWandClick(UINT downMsg) {
+    INPUT input = {};
+    input.type = INPUT_MOUSE;
+    input.mi.dwFlags = (downMsg == WM_LBUTTONDOWN) ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_RIGHTDOWN;
+    input.mi.dwExtraInfo = SENTINEL_MAGIC_WAND;
+    SendInput(1, &input, sizeof(INPUT));
+}
+
 static void Unhook(HHOOK& hook) {
     if (hook != NULL) {
         UnhookWindowsHookEx(hook);
@@ -198,6 +208,8 @@ LRESULT CALLBACK MessageHook::GetMsgHookProc(int code, WPARAM wParam, LPARAM lPa
         keys[VK_SPACE] |= 0x80;
         SetKeyboardState(keys);
         SendWandSpace(false);
+        SendWandClick(msg);
+        return swallow();
     }
 
     return CallNextHookEx(s_hGetMsgHook, code, wParam, lParam);

@@ -25,6 +25,7 @@ HWND MainWindow() { return g_frame; }
 static std::vector<INPUT> g_sent;
 static std::vector<MSG> g_delivered;
 static std::vector<unsigned> g_commands;
+static int g_clicksDelivered = 0;
 static int g_failures = 0;
 static HWND g_main = NULL;
 static HWND g_edit = NULL;
@@ -53,6 +54,7 @@ static void Pump(bool peekFirst) {
         if (!PeekMessageW(&m, NULL, 0, 0, PM_REMOVE)) break;
         if (m.message == WM_KEYDOWN || m.message == WM_KEYUP) g_delivered.push_back(m);
         if (m.message == WM_COMMAND && m.hwnd == g_main) g_commands.push_back(LOWORD(m.wParam));
+        if (m.message == WM_LBUTTONDOWN || m.message == WM_RBUTTONDOWN) ++g_clicksDelivered;
         DispatchMessageW(&m);
     }
 }
@@ -118,6 +120,7 @@ static void Reset() {
     g_sent.clear();
     g_delivered.clear();
     g_commands.clear();
+    g_clicksDelivered = 0;
 }
 
 static void Run(const char* name, void (*test)(bool), bool peekFirst) {
@@ -182,6 +185,30 @@ static void ClickDuringHoldEngagesWandAtOnce(bool peek) {
     Key(WM_KEYUP, VK_SPACE, peek);
     CHECK(WandReleases() == 1);
     CHECK(!HudWindow::IsVisible());
+}
+
+// Archicad 29 takes Space from its own key message, so the click it modifies
+// must arrive after Space: the original click is withheld and replayed behind it.
+static void ClickIsReplayedAfterSpace(bool peek, UINT clickMsg, DWORD mouseFlag) {
+    Key(WM_KEYDOWN, VK_SPACE, peek);
+    PostMessageW(g_main, clickMsg, MK_LBUTTON, MAKELPARAM(10, 10));
+    Pump(peek);
+    CHECK(g_clicksDelivered == 0);
+    CHECK(g_sent.size() == 2);
+    if (g_sent.size() == 2) {
+        CHECK(g_sent[0].type == INPUT_KEYBOARD && g_sent[0].ki.wVk == VK_SPACE);
+        CHECK(g_sent[1].type == INPUT_MOUSE && (g_sent[1].mi.dwFlags & mouseFlag) != 0);
+        CHECK(g_sent[1].mi.dwExtraInfo == SENTINEL_MAGIC_WAND);
+    }
+    Key(WM_KEYUP, VK_SPACE, peek);
+}
+
+static void LeftClickIsReplayedAfterSpace(bool peek) {
+    ClickIsReplayedAfterSpace(peek, WM_LBUTTONDOWN, MOUSEEVENTF_LEFTDOWN);
+}
+
+static void RightClickIsReplayedAfterSpace(bool peek) {
+    ClickIsReplayedAfterSpace(peek, WM_RBUTTONDOWN, MOUSEEVENTF_RIGHTDOWN);
 }
 
 static void TextFieldGetsTheSpace(bool peek) {
@@ -538,6 +565,8 @@ int main() {
         Run("Hold engages Magic Wand", HoldEngagesMagicWand, peek);
         Run("Tap just under hold time", TapJustUnderHoldTime, peek);
         Run("Click during hold engages wand at once", ClickDuringHoldEngagesWandAtOnce, peek);
+        Run("Left click during hold is replayed after Space", LeftClickIsReplayedAfterSpace, peek);
+        Run("Right click during hold is replayed after Space", RightClickIsReplayedAfterSpace, peek);
         Run("Text field keeps the space", TextFieldGetsTheSpace, peek);
         Run("DG rich edit keeps the space", DgRichEditKeepsTheSpace, peek);
         Run("Modal dialog keeps the space", ModalDialogGetsTheSpace, peek);
