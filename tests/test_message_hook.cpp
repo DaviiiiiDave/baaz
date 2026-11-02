@@ -24,6 +24,7 @@ static std::vector<MSG> g_delivered;
 static int g_failures = 0;
 static HWND g_main = NULL;
 static HWND g_edit = NULL;
+static HWND g_dgRichEdit = NULL;
 
 UINT WINAPI TestSendInput(UINT cInputs, LPINPUT pInputs, int /*cbSize*/) {
     for (UINT i = 0; i < cInputs; ++i) g_sent.push_back(pInputs[i]);
@@ -186,6 +187,16 @@ static void TextFieldGetsTheSpace(bool peek) {
     CHECK(WandPresses() == 0);
 }
 
+// Archicad's text editor on the plan is a DG rich edit, not a Win32 Edit
+static void DgRichEditKeepsTheSpace(bool peek) {
+    SetFocus(g_dgRichEdit);
+    Tap(VK_SPACE, peek);
+    CHECK(!HudWindow::IsVisible());
+    CHECK(DeliveredSpaces() == 2);
+    PumpFor(450, peek);
+    CHECK(WandPresses() == 0);
+}
+
 static void ModalDialogGetsTheSpace(bool peek) {
     EnableWindow(g_main, FALSE);
     Tap(VK_SPACE, peek);
@@ -333,6 +344,12 @@ int main() {
     g_main = CreateWindowExW(0, wc.lpszClassName, L"Archicad 30 (hook test)", WS_OVERLAPPEDWINDOW,
                              -2000, -2000, 400, 300, NULL, NULL, hInst, NULL);
     g_edit = CreateWindowExW(0, L"Edit", L"", WS_CHILD | WS_VISIBLE, 0, 0, 100, 20, g_main, NULL, hInst, NULL);
+    WNDCLASSW dgClass = {};
+    dgClass.lpfnWndProc = DefWindowProcW;
+    dgClass.hInstance = hInst;
+    dgClass.lpszClassName = L"DGUniRichEditClass";
+    RegisterClassW(&dgClass);
+    g_dgRichEdit = CreateWindowExW(0, dgClass.lpszClassName, L"", WS_CHILD | WS_VISIBLE, 0, 30, 100, 20, g_main, NULL, hInst, NULL);
     ShowWindow(g_main, SW_SHOWNOACTIVATE);
 
     SearchEngine::Initialize();
@@ -350,6 +367,7 @@ int main() {
         Run("Tap just under hold time", TapJustUnderHoldTime, peek);
         Run("Click during hold engages wand at once", ClickDuringHoldEngagesWandAtOnce, peek);
         Run("Text field keeps the space", TextFieldGetsTheSpace, peek);
+        Run("DG rich edit keeps the space", DgRichEditKeepsTheSpace, peek);
         Run("Modal dialog keeps the space", ModalDialogGetsTheSpace, peek);
         Run("Lost keyup, then tap", LostKeyUpThenTap, peek);
         Run("Typing does not double letters", TypingDoesNotDoubleLetters, peek);
