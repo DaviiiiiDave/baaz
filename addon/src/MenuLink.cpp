@@ -5,20 +5,22 @@
 
 namespace Baaz {
 
-// Command numbers of the AC29 standard scheme whose item Archicad replaces at run time. Found by
-// the German names of the built-in items (MDID 0) that start with "Keine ", "Kein ", "Letzte" or
-// "Add-On" (which also covers "Add-On-"); this includes graphic override combinations (23040) and
-// model view options (9472). The numbers do not depend on the language. 1027, 1293 and 20754 are
-// static commands that match by name only; they stay in the table, so they are never offered,
-// which is the safe side. Sorted for binary search.
+// Command numbers of the AC29 standard scheme whose item Archicad replaces at run time or whose
+// meaning depends on a modifier key. Found by the German names of the built-in items (MDID 0)
+// that start with "Keine ", "Kein ", "Letzte" or "Add-On" (which also covers "Add-On-"), and by
+// the items flagged dynamic="yes" in the scheme (exactly two: 514 and 2563). This includes graphic
+// override combinations (23040) and model view options (9472). The numbers do not depend on the
+// language. 1027, 1293 and 20754 are static commands that match by name only; they stay in the
+// table, so they are never offered, which is the safe side. Sorted for binary search.
 static const unsigned kPlaceholderCommands[] = {
-    522, 542, 550, 551, 778, 787, 794, 1027, 1293, 1549, 1551, 1802,
-    1803, 2055, 2578, 2817, 2825, 2826, 2832, 2833, 2834, 2835, 2836, 2841,
-    2848, 2851, 3331, 3332, 3333, 3356, 5901, 6409, 6658, 6660, 8196, 8449,
-    8450, 8706, 8962, 9218, 9472, 9986, 9987, 10008, 10018, 10019, 10020, 10027,
-    10028, 10034, 10497, 10754, 10755, 11010, 11011, 11266, 11267, 11522, 11523, 11778,
-    11779, 12034, 12035, 14341, 15105, 16129, 16641, 16642, 17923, 17924, 20754, 20994,
-    20995, 21250, 21251, 21506, 21507, 21768, 22018, 22019, 22530, 22785, 23040
+    514, 522, 542, 550, 551, 778, 787, 794, 1027, 1293, 1549, 1551,
+    1802, 1803, 2055, 2563, 2578, 2817, 2825, 2826, 2832, 2833, 2834, 2835,
+    2836, 2841, 2848, 2851, 3331, 3332, 3333, 3356, 5901, 6409, 6658, 6660,
+    8196, 8449, 8450, 8706, 8962, 9218, 9472, 9986, 9987, 10008, 10018, 10019,
+    10020, 10027, 10028, 10034, 10497, 10754, 10755, 11010, 11011, 11266, 11267, 11522,
+    11523, 11778, 11779, 12034, 12035, 14341, 15105, 16129, 16641, 16642, 17923, 17924,
+    20754, 20994, 20995, 21250, 21251, 21506, 21507, 21768, 22018, 22019, 22530, 22785,
+    23040
 };
 
 static const wchar_t* const kPathSeparator = L" \u203a ";
@@ -142,7 +144,8 @@ private:
             LinkList(m_catalogueSegments[first], m_liveSegments[liveFirst]);
             return;
         }
-        if (liveCount == last - first + 1) PairRun(first, liveFirst, liveCount);
+        // With several catalogue segments an equal live count cannot show which is which
+        if (first == last && liveCount == 1) PairRun(first, liveFirst, 1);
     }
 
     bool IsLonePlaceholder(const Segment& segment) const {
@@ -252,7 +255,7 @@ static bool TitlesMatch(const std::vector<MenuNode>& bar, const std::vector<std:
 
 // false if the live menu bar is not the one the catalogue describes
 static bool LinkBar(const std::vector<MenuNode>& bar, MenuSource& live, const std::vector<DynamicList>& lists,
-             std::vector<LinkedCommand>& linked) {
+                    std::vector<LinkedCommand>& linked) {
     if (!TitlesMatch(bar, live.TopLevelTitles())) return false;
     LinkRun run{ live, lists, {} };
     for (size_t i = 0; i < bar.size(); ++i) {

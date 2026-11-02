@@ -40,6 +40,8 @@ struct DynamicList {
 // nothing is linked there: a name must never run a different command.
 class MenuLink {
 public:
+    // Assumes equal item counts mean the same items in the same order: a missing static item made
+    // up for by an extra placeholder entry cannot be seen here, so callers re-check before running.
     static std::vector<LinkedCommand> Link(const std::vector<MenuNode>& bar, MenuSource& live,
                                            const std::vector<DynamicList>& lists);
     // -1 if top-level titles differ; otherwise the number of linked commands

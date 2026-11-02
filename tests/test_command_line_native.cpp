@@ -374,6 +374,7 @@ static const int P = -1;  // popup
 static const int S = -2;  // separator
 static const unsigned kAddOnPlaceholder = 1803;
 static const unsigned kSecondAddOnPlaceholder = 1802;
+static const unsigned kModifierDependent = 514;
 static const unsigned kGraphicOverridePlaceholder = 23040;
 static const unsigned kModelViewPlaceholder = 9472;
 static const wchar_t* const kSeparator = L" \u203a ";
@@ -843,11 +844,23 @@ void TestPlaceholderRegionSizeMismatch() {
     // Three catalogue segments between the outer ones, four live ones: B cannot be placed
     auto commands = LinkOne(bar, { 1, S, 5, S, 6, S, 7, S, 8, S, 4 });
     assert((LinkedNames(commands) == std::vector<std::wstring>{ L"A", L"D" }));
-    // Same number of segments: matched one to one
+    // Same number of segments, but it cannot show which is which: 2 may be a list entry that
+    // spilled over, with the second placeholder gone and B being 6
     commands = LinkOne(bar, { 1, S, 5, S, 2, S, 6, S, 4 });
-    assert((LinkedNames(commands) == std::vector<std::wstring>{ L"A", L"B", L"D" }));
-    assert((LinkedIds(commands) == std::vector<unsigned>{ 1, 2, 4 }));
+    assert((LinkedNames(commands) == std::vector<std::wstring>{ L"A", L"D" }));
+    assert((LinkedIds(commands) == std::vector<unsigned>{ 1, 4 }));
     std::cout << "[PASS] TestPlaceholderRegionSizeMismatch\n";
+}
+
+void TestDynamicItemIsNeverOffered() {
+    std::vector<MenuNode> bar = { ItemNode(L"A", 11), ItemNode(L"Dynamic", kModifierDependent), ItemNode(L"B", 12) };
+    auto commands = LinkOne(bar, { 1, 2, 3 });
+    assert((LinkedNames(commands) == std::vector<std::wstring>{ L"A", L"B" }));
+    assert((LinkedIds(commands) == std::vector<unsigned>{ 1, 3 }));
+    commands = LinkOne(bar, { 1, 2, 3, 4 });
+    assert((LinkedIds(commands) == std::vector<unsigned>{ 1, 4 }));
+    assert(FindCommand(commands, L"Dynamic") == nullptr);
+    std::cout << "[PASS] TestDynamicItemIsNeverOffered\n";
 }
 
 static FILETIME FileTimeFrom(unsigned long long ticks) {
@@ -910,6 +923,7 @@ int main() {
     TestPlaceholderIsNeverOffered();
     TestPlaceholderSegmentGoneLinksNothing();
     TestPlaceholderRegionSizeMismatch();
+    TestDynamicItemIsNeverOffered();
     TestStaleExport();
     std::cout << "All command line tests passed\n";
     return 0;
