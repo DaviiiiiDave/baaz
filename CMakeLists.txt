@@ -21,6 +21,7 @@ set(BAAZ_SHARED_SOURCES
     ${CMAKE_SOURCE_DIR}/addon/src/HudWindow.cpp
     ${CMAKE_SOURCE_DIR}/addon/src/MessageHook.cpp
     ${CMAKE_SOURCE_DIR}/addon/src/NavigatorIndexer.cpp
+    ${CMAKE_SOURCE_DIR}/addon/src/SchemeReader.cpp
     ${CMAKE_SOURCE_DIR}/addon/src/SearchEngine.cpp
     ${CMAKE_SOURCE_DIR}/addon/src/Settings.cpp
     ${CMAKE_SOURCE_DIR}/addon/src/SettingsDialog.cpp

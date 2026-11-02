@@ -19,3 +19,13 @@ target_compile_definitions(test_message_hook PRIVATE UNICODE _UNICODE)
 target_compile_options(test_message_hook PRIVATE "/FI${CMAKE_CURRENT_SOURCE_DIR}/test_sendinput_stub.hpp")
 target_link_libraries(test_message_hook PRIVATE ${BAAZ_WIN32_LIBS})
 add_test(NAME MessageHookEdgeCases COMMAND test_message_hook)
+
+# Command scheme reader, tested against a trimmed copy of a real export
+add_executable(test_command_line_native
+    test_command_line_native.cpp
+    ../addon/src/SchemeReader.cpp
+)
+target_include_directories(test_command_line_native PRIVATE ../addon/include)
+target_compile_definitions(test_command_line_native PRIVATE UNICODE _UNICODE
+    BAAZ_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+add_test(NAME CommandLineNative COMMAND test_command_line_native)
