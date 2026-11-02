@@ -1,0 +1,45 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Fridays 03:30 UTC, so new CodeQL queries also run on unchanged code
+    - cron: "30 3 * * 5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: Security and quality analysis (C++)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: ./.github/actions/setup-devkit
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: c-cpp
+          build-mode: manual
+          queries: security-and-quality
+      - name: Build
+        run: |
+          cmake -S . -B build -DARCHICAD_DEVKIT_DIR="${{ env.ARCHICAD_DEVKIT_DIR }}"
+          cmake --build build --config Release
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:c-cpp

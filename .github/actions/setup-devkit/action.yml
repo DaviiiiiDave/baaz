@@ -1,0 +1,34 @@
+name: Set up the Archicad DevKit
+description: Downloads (or restores from cache) Graphisoft's public Archicad API DevKit and sets ARCHICAD_DEVKIT_DIR.
+
+inputs:
+  url:
+    description: DevKit zip from github.com/GRAPHISOFT/archicad-api-devkit releases
+    default: https://github.com/GRAPHISOFT/archicad-api-devkit/releases/download/30.3000/API.Development.Kit.WIN.30.3000.zip
+
+runs:
+  using: composite
+  steps:
+    - name: Restore the DevKit from cache
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/devkit
+        key: archicad-devkit-${{ inputs.url }}
+
+    - name: Download the DevKit
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: |
+        Invoke-WebRequest -Uri "${{ inputs.url }}" -OutFile "$env:RUNNER_TEMP/devkit.zip"
+        Expand-Archive -Path "$env:RUNNER_TEMP/devkit.zip" -DestinationPath "$env:RUNNER_TEMP/devkit"
+
+    - name: Point ARCHICAD_DEVKIT_DIR at the folder that contains Support/Inc
+      shell: pwsh
+      run: |
+        $header = Get-ChildItem "$env:RUNNER_TEMP/devkit" -Recurse -Filter ACAPinc.h |
+          Where-Object { $_.Directory.Name -eq 'Inc' -and $_.Directory.Parent.Name -eq 'Support' } |
+          Select-Object -First 1
+        if (-not $header) { throw "ACAPinc.h not found in the DevKit download" }
+        $dir = $header.Directory.Parent.Parent.FullName -replace '\\', '/'
+        "ARCHICAD_DEVKIT_DIR=$dir" >> $env:GITHUB_ENV

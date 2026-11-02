@@ -1,0 +1,20 @@
+# Build output
+build/
+out/
+.vs/
+*.user
+CMakeUserPresets.json
+__pycache__/
+
+# Local testing only: a borrowed MDID must never be published or distributed
+addon/resources/AddOnFix.local.grc
+
+# Local tooling that calls Archicad's internal add-on validation code
+tools/check_mdid.py
+
+# AI-assistant workflow files and early planning notes (local only)
+.gemini/
+.claude/
+GEMINI.md
+ORIGINAL_REQUEST.md
+docs/
