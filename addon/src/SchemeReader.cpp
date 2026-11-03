@@ -275,8 +275,7 @@ static bool FindFloorPlanBar(const XmlElement& element, const XmlElement*& bar) 
     return true;
 }
 
-// "&&" is a literal ampersand, a single "&" marks the access key
-static std::wstring CleanName(const std::wstring& raw) {
+std::wstring CleanName(const std::wstring& raw) {
     std::wstring name;
     for (size_t i = 0; i < raw.size(); ++i) {
         if (raw[i] != L'&') {

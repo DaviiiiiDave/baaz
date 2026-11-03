@@ -30,3 +30,15 @@ target_include_directories(test_command_line_native PRIVATE ../addon/include)
 target_compile_definitions(test_command_line_native PRIVATE UNICODE _UNICODE
     BAAZ_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 add_test(NAME CommandLineNative COMMAND test_command_line_native)
+
+# Win32 menu filling and running against a real test window, and loading of the exported command list
+add_executable(test_live_menu
+    test_live_menu.cpp
+    ../addon/src/CommandSource.cpp
+    ../addon/src/MenuLink.cpp
+    ../addon/src/SchemeReader.cpp
+)
+target_include_directories(test_live_menu PRIVATE ../addon/include)
+target_compile_definitions(test_live_menu PRIVATE UNICODE _UNICODE)
+target_link_libraries(test_live_menu PRIVATE user32)
+add_test(NAME LiveMenu COMMAND test_live_menu)

@@ -14,6 +14,9 @@ struct MenuNode {
     std::vector<MenuNode> children;  // Popup only
 };
 
+// Menu text without access keys: "&&" is a literal ampersand, a single "&" marks the access key.
+std::wstring CleanName(const std::wstring& raw);
+
 // Reads an exported Archicad command-layout scheme (Work Environment) into a menu tree.
 class SchemeReader {
 public:

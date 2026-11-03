@@ -1,5 +1,7 @@
 #include "HudWindow.hpp"
+#include "BaazAddon.hpp"
 #include "CommandExecutor.hpp"
+#include "CommandSource.hpp"
 #include "NavigatorIndexer.hpp"
 #include <windowsx.h>
 #include <gdiplus.h>
@@ -399,10 +401,14 @@ LRESULT CALLBACK HudWindow::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM 
         return 0;
     }
 
-    case WM_BAAZ_REFRESH_INDEX:
-        SearchEngine::SetProjectItems(NavigatorIndexer::BuildProjectIndex());
+    case WM_BAAZ_REFRESH_INDEX: {
+        std::vector<SearchItem> items = NavigatorIndexer::BuildProjectIndex();
+        const std::vector<SearchItem> commands = CommandSource::BuildCommandIndex(MainWindow(), {});
+        items.insert(items.end(), commands.begin(), commands.end());
+        SearchEngine::SetProjectItems(std::move(items));
         if (s_visible) SetQuery(s_query);
         return 0;
+    }
 
     case WM_LBUTTONDOWN: {
         // MessageHook keeps the matching button-up away from the canvas

@@ -1,4 +1,5 @@
 #include "CommandExecutor.hpp"
+#include "CommandSource.hpp"
 #include "SettingsDialog.hpp"
 #include "BaazAddon.hpp"
 
@@ -76,6 +77,8 @@ bool CommandExecutor::Execute(const SearchItem& item) {
     case ItemKind::Setting:
         SettingsDialog::Show(MainWindow());
         return true;
+    case ItemKind::Command:
+        return CommandSource::Run(item, MainWindow());
     case ItemKind::Help:
         return true;
     }
