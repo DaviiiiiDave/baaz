@@ -239,17 +239,19 @@ static bool HasSchemeMarker(const fs::path& path) {
     return std::string_view(head, static_cast<size_t>(file.gcount())).find(kSchemeMarker) != std::string_view::npos;
 }
 
-static void CollectSchemeTimes(const fs::path& folder, std::vector<FILETIME>& times) {
+// false if the folder could not be read completely: a newer scheme file may be in the part not read
+static bool CollectSchemeTimes(const fs::path& folder, std::vector<FILETIME>& times) {
     std::error_code error;
     fs::recursive_directory_iterator it(folder, error);
     for (; !error && it != fs::recursive_directory_iterator(); it.increment(error)) {
         if (it.depth() >= kMaxSchemeDepth) it.disable_recursion_pending();
+        std::error_code entryError;
+        if (!it->is_regular_file(entryError) || !HasExtension(it->path(), L".bin") || !HasSchemeMarker(it->path())) continue;
         FILETIME time;
-        if (it->is_regular_file(error) && HasExtension(it->path(), L".bin") && HasSchemeMarker(it->path()) &&
-            ReadWriteTime(it->path(), time)) {
-            times.push_back(time);
-        }
+        if (!ReadWriteTime(it->path(), time)) return false;
+        times.push_back(time);
     }
+    return !error;
 }
 
 static Freshness CheckFreshness(const FILETIME& exportTime, const CommandSource::Locations& where) {
@@ -257,7 +259,11 @@ static Freshness CheckFreshness(const FILETIME& exportTime, const CommandSource:
     const std::vector<fs::path> folders = major.empty() ? std::vector<fs::path>() : ArchicadFolders(where.graphisoft, major);
     if (folders.empty()) return Freshness::Unknown;
     std::vector<FILETIME> schemeTimes;
-    for (const fs::path& folder : folders) CollectSchemeTimes(folder, schemeTimes);
+    for (const fs::path& folder : folders) {
+        if (!CollectSchemeTimes(folder, schemeTimes)) return Freshness::Unknown;
+    }
+    // No scheme file found is no evidence that the export is current
+    if (schemeTimes.empty()) return Freshness::Unknown;
     return MenuLink::IsExportStale(exportTime, schemeTimes) ? Freshness::Stale : Freshness::Current;
 }
 

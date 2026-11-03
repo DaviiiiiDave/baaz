@@ -144,6 +144,8 @@ public:
                   contents, secondsFromBase);
     }
 
+    void CreateArchicadFolder() const { std::filesystem::create_directories(AppData() / L"GRAPHISOFT" / L"Archicad 29 TST R1"); }
+
 private:
     std::filesystem::path m_root;
 };
@@ -233,13 +235,30 @@ void TestOffersCommandsWhenCurrent() {
     std::cout << "[PASS] TestOffersCommandsWhenCurrent\n";
 }
 
-void TestSchemeFileWithoutMarkerIsIgnored() {
+// Without a scheme file to compare with, the export cannot be called current: commands plus the note
+static void AssertCommandsWithCannotCheckNote(HWND frame) {
+    std::vector<SearchItem> items = CommandSource::BuildCommandIndex(frame, {});
+    assert(items.size() == 3);
+    assert(items[0].kind == ItemKind::Command && items[1].kind == ItemKind::Command);
+    assert(items[2].kind == ItemKind::Help && items[2].title == L"Command list: cannot check whether the export is current");
+}
+
+void TestSchemeFileWithoutMarkerIsUnknown() {
     TestFrame frame(Fill::Normal);
     TestFolders folders;
     folders.WriteExport(60);
     folders.WriteScheme("a newer file that is not a command layout", 120);
-    assert(CommandSource::BuildCommandIndex(frame.Hwnd(), {}).size() == 2);
-    std::cout << "[PASS] TestSchemeFileWithoutMarkerIsIgnored\n";
+    AssertCommandsWithCannotCheckNote(frame.Hwnd());
+    std::cout << "[PASS] TestSchemeFileWithoutMarkerIsUnknown\n";
+}
+
+void TestArchicadFolderWithoutSchemeFilesIsUnknown() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    folders.WriteExport(60);
+    folders.CreateArchicadFolder();
+    AssertCommandsWithCannotCheckNote(frame.Hwnd());
+    std::cout << "[PASS] TestArchicadFolderWithoutSchemeFilesIsUnknown\n";
 }
 
 void TestNoExportOffersNothing() {
@@ -305,7 +324,8 @@ int main() {
     TestRunRefusesWrongKindOrPosition();
     TestStatusLineWhenStale();
     TestOffersCommandsWhenCurrent();
-    TestSchemeFileWithoutMarkerIsIgnored();
+    TestSchemeFileWithoutMarkerIsUnknown();
+    TestArchicadFolderWithoutSchemeFilesIsUnknown();
     TestNoExportOffersNothing();
     TestExportForOtherMenuBarIsOutOfDate();
     TestTwoEquallyFittingExportsOfferNothing();
