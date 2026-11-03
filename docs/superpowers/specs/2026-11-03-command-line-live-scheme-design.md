@@ -67,6 +67,20 @@ current, and takes only the item **names** from an export.
   collide (this also separates the ambiguous numbers 1027, 1293, 20754 noted in Task 2, where
   the MDID differs). An item whose id has no name in the export is **not offered**; it still
   counts for positions.
+- **Items of add-ons that are not loaded are removed first** (measured 2026-11-03, Archicad 29,
+  Dave's office scheme; decided by Dave, option A). The `.bin` keeps the configured layout,
+  including commands of add-ons that are not loaded. The live menu and the export leave those
+  commands out, and also a submenu that has nothing left: the add-on menu *CI Tools* has 15
+  submenus in the `.bin` and 2 in the live menu and in the export; the 13 hidden ones hold only
+  commands whose MDID pair occurs nowhere in the export's floor-plan bar. Before linking, Baaz
+  therefore removes from the `.bin` tree every `Item` with a non-zero MDID whose pair
+  (MDID1, MDID2) occurs in no `Item` of the chosen export's floor-plan bar, and then every popup
+  that had an `Item` or popup before this removal and has none left. Built-in commands (MDID 0)
+  are never removed; popups that were empty already stay. With this rule the office `.bin`
+  equals its export in both bars; the standard scheme is unchanged. Accepted cost: an add-on
+  installed after the export is removed as well; if Archicad shows its commands, positions in
+  that top-level menu no longer fit, so that menu is not linked until the next export (nothing
+  wrong is run), and those commands are not counted as new.
 - **Which `.bin` is the active scheme** *(my call)*: every `.bin` under the running Archicad's
   `%APPDATA%\GRAPHISOFT\Archicad <major>…` folder (up to three levels deep, recognised by the
   scheme marker in its first 512 bytes, as today) is a candidate. Baaz links each candidate
@@ -111,8 +125,8 @@ dann eine Mini-Anleitung"). Views, tools and everything else stay searchable as 
 
 - *(My call)* "*N* commands are new" counts only items that link to a live item, are not a
   placeholder (dynamic lists, base spec 4.4) and have no name in the export. Right after a fresh
-  export of the current state, *N* is therefore 0 unless an add-on menu was not loaded during the
-  export; such items stay unnamed and are counted.
+  export of the current state, *N* is therefore 0; commands of add-ons the export does not
+  contain are removed before linking (section 3) and are not counted.
 - *(My call)* The hint row is never the default selection, takes no slot from the result count,
   is reachable with the arrow keys and runs on Enter or click only, not on Space. Typing
   `lineal` and pressing Enter must keep running *Lineal*.
@@ -178,7 +192,8 @@ dann eine Mini-Anleitung"). Views, tools and everything else stay searchable as 
 - Automated (synthetic `.bin` built in test code): reader produces the expected tree;
   truncated file, unknown record, wrong header, oversize file each give "unreadable"; names
   attached by full id (same number, different MDID); unnamed item keeps positions and is not
-  offered; newest fitting export wins; candidate choice by fit score then write time; each of
+  offered; items of add-ons absent from the export are removed, popups emptied by that are
+  removed, built-in items and already-empty popups stay; newest fitting export wins; candidate choice by fit score then write time; each of
   the three hint states.
 - Local, skipped when the files are missing: the real AC29 and AC30 `.bin` give the same tree as
   the XML export of the same state. Needs one AC30 profile export taken without pressing OK

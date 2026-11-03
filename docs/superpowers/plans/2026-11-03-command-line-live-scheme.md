@@ -34,6 +34,7 @@ stages:
 3. **A command added to a menu after the export** → not offered, counted, "N commands are new" hint. Test: Task 3b `TestUnnamedCommandIsCountedNotOffered`.
 4. **Two scheme files fit equally and were written at the same time** → no commands (A1). Test: Task 3b `TestTiedSchemesWithSameTimeOfferNothing`.
 5. **Typing `lineal` and pressing Enter while a hint is shown** → runs *Lineal*, not the hint. Test: Task 3c `TestHintIsNeverDefaultSelection`.
+6. **An add-on menu whose commands are configured but not loaded** (CI Tools: 15 submenus in the `.bin`, 2 live) → removed before linking, the rest of the menu links. Test: Task 3b `TestAbsentAddOnItemsAreDropped`.
 
 ---
 
@@ -90,6 +91,9 @@ stages:
 - Consumes: `BinSchemeReader::Read`, `BinScheme` (Task 3a); `LiveMenu`, `Run`, title matching (Task 3).
 - Produces:
   ```cpp
+  // Removes every Item with a non-zero MDID whose (mdid1, mdid2) occurs in no Item of exportBar, then
+  // every Popup that had an Item or Popup before and has none left (addendum 3, option A).
+  void DropAbsentAddOnItems(std::vector<MenuNode>& bar, const std::vector<MenuNode>& exportBar);   // MenuLink.hpp
   // Sets the name of every Item of bar whose full id has an Item in exportBar; others stay empty.
   void AttachNames(std::vector<MenuNode>& bar, const std::vector<MenuNode>& exportBar);   // MenuLink.hpp
   enum class CommandState { Ready, NoExport, NewCommands, Unreadable };
@@ -104,6 +108,9 @@ stages:
 
 - [ ] **Step 1: Write the failing tests.**
   ```cpp
+  void TestAbsentAddOnItemsAreDropped();          // popup holding only items of an mdid pair absent from the export -> popup gone, later entries move up; an MDID-0 item absent from the export stays
+  void TestMixedPopupKeepsPresentItems();         // popup with items of an absent and a present mdid pair -> only the present ones stay, popup stays
+  void TestAlreadyEmptyPopupStays();              // popup with no items (or only separators) in the .bin stays where it is
   void TestAttachNamesByFullId();                 // same number, different mdids -> each gets its own name
   void TestMovedCommandKeepsItsName();            // structure has 1557 in another menu than the export -> linked at the new position as "Lineal"
   void TestUnnamedCommandIsCountedNotOffered();   // id unknown to the export -> not in commands, unnamed == 1, state NewCommands
@@ -118,7 +125,7 @@ stages:
   ```
   Delete the tests of the removed staleness check (`TestStaleExport`, `TestStatusLineWhenStale`, the "cannot check" tests) and say in the commit message why.
 - [ ] **Step 2: Run to see them fail.** `ctest --test-dir build -C Release -R "CommandLine|LiveMenu" --output-on-failure`.
-- [ ] **Step 3: Implement.** Candidates: every marker `.bin` found as today under `%APPDATA%\GRAPHISOFT\Archicad <major>…` (≤ 3 levels), read with `BinSchemeReader`, cached by path + write time + size. Exports: recursive under `.baaz\commands`, by marker, cached the same way. Choice and states exactly as addendum 3-5. Only if Task 3a's report established the active profile reliably: its scheme GUID picks the `.bin` and the fit score must still be ≥ 0; otherwise fit score, then write time. Remove `CheckFreshness`, `Freshness`, `kCannotCheck`, `s_checkNoted`, `IsExportStale`. Placeholder table by full id: set the MDID parts of 1027, 1293, 20754 from the standard export so that only the dynamic variant stays a placeholder; record in the report which static commands become offerable. `CommandExecutor` and `HudWindow` adapt to `CommandIndex` (HUD shows nothing new yet; Task 3c).
+- [ ] **Step 3: Implement.** Candidates: every marker `.bin` found as today under `%APPDATA%\GRAPHISOFT\Archicad <major>…` (≤ 3 levels), read with `BinSchemeReader`, cached by path + write time + size. Exports: recursive under `.baaz\commands`, by marker, cached the same way. Choice and states exactly as addendum 3-5. Order: choose the newest fitting export (top-level titles, D5; independent of the `.bin`) → for each `.bin` candidate run `DropAbsentAddOnItems` against that export's floor-plan bar → fit score and choice → `AttachNames` → link. Without an export there is nothing to filter (state NoExport). Only if Task 3a's report established the active profile reliably: its scheme GUID picks the `.bin` and the fit score must still be ≥ 0; otherwise fit score, then write time. Remove `CheckFreshness`, `Freshness`, `kCannotCheck`, `s_checkNoted`, `IsExportStale`. Placeholder table by full id: set the MDID parts of 1027, 1293, 20754 from the standard export so that only the dynamic variant stays a placeholder; record in the report which static commands become offerable. `CommandExecutor` and `HudWindow` adapt to `CommandIndex` (HUD shows nothing new yet; Task 3c).
 - [ ] **Step 4: Run the five checks.**
 - [ ] **Step 5: Commit.** `feat(command-line): take the menu structure from the live scheme`
 
