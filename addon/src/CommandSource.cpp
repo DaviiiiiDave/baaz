@@ -1,4 +1,5 @@
 #include "CommandSource.hpp"
+#include "Settings.hpp"
 #include <algorithm>
 #include <cwctype>
 #include <filesystem>
@@ -117,8 +118,7 @@ CommandSource::Locations CommandSource::CurrentLocations() {
 #endif
     Locations locations;
     locations.modulePath = RunningModulePath();
-    const std::wstring userProfile = EnvironmentValue(L"USERPROFILE");
-    if (!userProfile.empty()) locations.commands = (fs::path(userProfile) / L".baaz" / L"commands").wstring();
+    locations.commands = (fs::path(Settings::FolderPath()) / L"commands").wstring();
     const std::wstring appData = EnvironmentValue(L"APPDATA");
     if (!appData.empty()) locations.graphisoft = (fs::path(appData) / L"GRAPHISOFT").wstring();
     return locations;
@@ -138,56 +138,68 @@ static bool HasExtension(const fs::path& path, const wchar_t* extension) {
     return _wcsicmp(path.extension().c_str(), extension) == 0;
 }
 
-static bool ReadWriteTime(const fs::path& path, FILETIME& time) {
+static bool ReadWriteTime(const fs::path& path, FILETIME& time, unsigned long long* size = nullptr) {
     WIN32_FILE_ATTRIBUTE_DATA data = {};
     if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data)) return false;
     time = data.ftLastWriteTime;
+    if (size != nullptr) *size = (static_cast<unsigned long long>(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
     return true;
 }
 
-static std::vector<CommandSource::CachedExport> ListExports(const std::wstring& folder) {
-    std::vector<CommandSource::CachedExport> exports;
+// false if the folder could not be listed completely: an export left out could change which one fits
+static bool ListExports(const std::wstring& folder, std::vector<CommandSource::CachedExport>& exports) {
     std::error_code error;
     for (fs::directory_iterator it(folder, error), end; !error && it != end; it.increment(error)) {
+        std::error_code entryError;
+        const bool regular = it->is_regular_file(entryError);
+        if (entryError) return false;
+        if (!regular || !HasExtension(it->path(), L".xml")) continue;
         CommandSource::CachedExport found;
-        if (it->is_regular_file(error) && HasExtension(it->path(), L".xml") && ReadWriteTime(it->path(), found.time)) {
-            found.path = it->path().wstring();
-            exports.push_back(std::move(found));
-        }
+        found.path = it->path().wstring();
+        if (!ReadWriteTime(it->path(), found.time, &found.size)) return false;
+        exports.push_back(std::move(found));
     }
     std::sort(exports.begin(), exports.end(),
               [](const CommandSource::CachedExport& a, const CommandSource::CachedExport& b) { return a.path < b.path; });
-    return exports;
+    return !error;
 }
 
 static bool SameFiles(const std::vector<CommandSource::CachedExport>& a, const std::vector<CommandSource::CachedExport>& b) {
     return std::equal(a.begin(), a.end(), b.begin(), b.end(),
                       [](const CommandSource::CachedExport& x, const CommandSource::CachedExport& y) {
-                          return x.path == y.path && CompareFileTime(&x.time, &y.time) == 0;
+                          return x.path == y.path && CompareFileTime(&x.time, &y.time) == 0 && !y.readFailed;
                       });
 }
 
-static std::vector<MenuNode> ReadBar(const std::wstring& path) {
-    std::ifstream file(fs::path(path), std::ios::binary);
-    const std::string xml((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-    return SchemeReader::ReadFloorPlanMenuBar(xml);
+// false if the file is too large or cannot be read completely
+static bool ReadBar(const CommandSource::CachedExport& file, std::vector<MenuNode>& bar) {
+    if (file.size > kMaxInputBytes) return false;
+    std::ifstream stream(fs::path(file.path), std::ios::binary);
+    std::string xml(static_cast<size_t>(file.size), ' ');
+    if (!stream.is_open() || !stream.read(xml.data(), static_cast<std::streamsize>(xml.size()))) return false;
+    bar = SchemeReader::ReadFloorPlanMenuBar(xml);
+    return true;
 }
 
-const std::vector<CommandSource::CachedExport>& CommandSource::LoadExports(const std::wstring& folder) {
-    std::vector<CachedExport> listed = ListExports(folder);
+// A copy: the menu messages sent while linking can run code that refreshes s_exports
+std::vector<CommandSource::CachedExport> CommandSource::LoadExports(const std::wstring& folder) {
+    std::vector<CachedExport> listed;
+    if (!ListExports(folder, listed)) listed.clear();
     if (SameFiles(listed, s_exports)) return s_exports;
-    for (CachedExport& found : listed) found.bar = ReadBar(found.path);
+    for (CachedExport& found : listed) found.readFailed = !ReadBar(found, found.bar);
     s_exports = std::move(listed);
     return s_exports;
 }
 
-// The export that links most commands; none if no export fits or two fit equally well
+// The export that links most commands; none if no export fits, two fit equally well, or one could
+// not be read (it might be the one that fits)
 static const CommandSource::CachedExport* BestExport(const std::vector<CommandSource::CachedExport>& exports,
                                                      MenuSource& live) {
     const CommandSource::CachedExport* best = nullptr;
     int bestScore = -1;
     bool tie = false;
     for (const CommandSource::CachedExport& candidate : exports) {
+        if (candidate.readFailed) return nullptr;
         const int score = MenuLink::FitScore(candidate.bar, live);
         if (score > bestScore) {
             best = &candidate;
@@ -221,22 +233,35 @@ static bool IsFolderOfVersion(const std::wstring& name, const std::wstring& majo
     return name.size() == prefix.size() || !iswdigit(name[prefix.size()]);
 }
 
-static std::vector<fs::path> ArchicadFolders(const std::wstring& graphisoft, const std::wstring& major) {
-    std::vector<fs::path> folders;
+// false if the folder could not be listed completely
+static bool ArchicadFolders(const std::wstring& graphisoft, const std::wstring& major, std::vector<fs::path>& folders) {
     std::error_code error;
     for (fs::directory_iterator it(graphisoft, error), end; !error && it != end; it.increment(error)) {
-        if (it->is_directory(error) && IsFolderOfVersion(it->path().filename().wstring(), major)) {
-            folders.push_back(it->path());
-        }
+        std::error_code entryError;
+        const bool directory = it->is_directory(entryError);
+        if (entryError) return false;
+        if (directory && IsFolderOfVersion(it->path().filename().wstring(), major)) folders.push_back(it->path());
     }
-    return folders;
+    return !error;
 }
 
-static bool HasSchemeMarker(const fs::path& path) {
+// false if the file cannot be read
+static bool HasSchemeMarker(const fs::path& path, bool& found) {
     std::ifstream file(path, std::ios::binary);
+    if (!file.is_open()) return false;
     char head[kMarkerBytes];
     file.read(head, sizeof(head));
-    return std::string_view(head, static_cast<size_t>(file.gcount())).find(kSchemeMarker) != std::string_view::npos;
+    if (file.bad()) return false;
+    found = std::string_view(head, static_cast<size_t>(file.gcount())).find(kSchemeMarker) != std::string_view::npos;
+    return true;
+}
+
+// Whether the entry is a .bin file; false if that cannot be told
+static bool IsBinFile(const fs::directory_entry& entry, bool& isBin) {
+    std::error_code error;
+    const bool regular = entry.is_regular_file(error);
+    isBin = regular && HasExtension(entry.path(), L".bin");
+    return !error;
 }
 
 // false if the folder could not be read completely: a newer scheme file may be in the part not read
@@ -245,8 +270,12 @@ static bool CollectSchemeTimes(const fs::path& folder, std::vector<FILETIME>& ti
     fs::recursive_directory_iterator it(folder, error);
     for (; !error && it != fs::recursive_directory_iterator(); it.increment(error)) {
         if (it.depth() >= kMaxSchemeDepth) it.disable_recursion_pending();
-        std::error_code entryError;
-        if (!it->is_regular_file(entryError) || !HasExtension(it->path(), L".bin") || !HasSchemeMarker(it->path())) continue;
+        bool isBin = false;
+        bool marked = false;
+        if (!IsBinFile(*it, isBin)) return false;
+        if (!isBin) continue;
+        if (!HasSchemeMarker(it->path(), marked)) return false;
+        if (!marked) continue;
         FILETIME time;
         if (!ReadWriteTime(it->path(), time)) return false;
         times.push_back(time);
@@ -256,8 +285,8 @@ static bool CollectSchemeTimes(const fs::path& folder, std::vector<FILETIME>& ti
 
 static Freshness CheckFreshness(const FILETIME& exportTime, const CommandSource::Locations& where) {
     const std::wstring major = ArchicadMajorVersion(where.modulePath);
-    const std::vector<fs::path> folders = major.empty() ? std::vector<fs::path>() : ArchicadFolders(where.graphisoft, major);
-    if (folders.empty()) return Freshness::Unknown;
+    std::vector<fs::path> folders;
+    if (major.empty() || !ArchicadFolders(where.graphisoft, major, folders) || folders.empty()) return Freshness::Unknown;
     std::vector<FILETIME> schemeTimes;
     for (const fs::path& folder : folders) {
         if (!CollectSchemeTimes(folder, schemeTimes)) return Freshness::Unknown;
@@ -292,9 +321,9 @@ static std::vector<SearchItem> ToSearchItems(const std::vector<LinkedCommand>& l
 }
 
 std::vector<SearchItem> CommandSource::BuildCommandIndex(HWND frame, const std::vector<DynamicList>& lists) {
-    if (!IsWindow(frame)) return {};
+    if (!IsWindow(frame) || GetMenu(frame) == nullptr) return {};
     const Locations where = CurrentLocations();
-    const std::vector<CachedExport>& exports = LoadExports(where.commands);
+    const std::vector<CachedExport> exports = LoadExports(where.commands);
     if (exports.empty()) return {};
     LiveMenu live(frame);
     const CachedExport* chosen = BestExport(exports, live);
@@ -302,6 +331,8 @@ std::vector<SearchItem> CommandSource::BuildCommandIndex(HWND frame, const std::
     const Freshness freshness = CheckFreshness(chosen->time, where);
     if (freshness == Freshness::Stale) return { StatusItem(kOutOfDate) };
     std::vector<SearchItem> items = ToSearchItems(MenuLink::Link(chosen->bar, live, lists));
+    // A fitting export that links nothing means the menus differ from it in a way that hides every command
+    if (items.empty()) return { StatusItem(kOutOfDate) };
     if (freshness == Freshness::Unknown && !s_checkNoted) {
         s_checkNoted = true;
         items.push_back(StatusItem(kCannotCheck));
@@ -315,7 +346,8 @@ static bool HasRunnableShape(const SearchItem& item) {
 }
 
 bool CommandSource::Run(const SearchItem& item, HWND frame) {
-    if (!HasRunnableShape(item) || !IsWindow(frame)) return false;
+    // A disabled frame has a modal dialog open on top of it; nothing may run underneath that
+    if (!HasRunnableShape(item) || !IsWindow(frame) || !IsWindowEnabled(frame)) return false;
     LiveMenu live(frame);
     const std::vector<int> menuPath(item.menuPosition.begin(), item.menuPosition.end() - 1);
     const std::vector<LiveEntry> entries = live.Entries(menuPath);

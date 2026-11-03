@@ -403,8 +403,12 @@ LRESULT CALLBACK HudWindow::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM 
 
     case WM_BAAZ_REFRESH_INDEX: {
         std::vector<SearchItem> items = NavigatorIndexer::BuildProjectIndex();
-        const std::vector<SearchItem> commands = CommandSource::BuildCommandIndex(MainWindow(), {});
-        items.insert(items.end(), commands.begin(), commands.end());
+        // An exception must not leave the window procedure; the project items are still offered
+        try {
+            const std::vector<SearchItem> commands = CommandSource::BuildCommandIndex(MainWindow(), {});
+            items.insert(items.end(), commands.begin(), commands.end());
+        } catch (...) {
+        }
         SearchEngine::SetProjectItems(std::move(items));
         if (s_visible) SetQuery(s_query);
         return 0;

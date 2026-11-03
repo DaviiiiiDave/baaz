@@ -18,7 +18,6 @@ static const size_t kMaxXmlDepth = 64;
 static const size_t kMaxMenuNodes = 100000;
 // Linking copies menu paths, so long titles would multiply memory; real names are far shorter.
 static const size_t kMaxNameLength = 512;
-static const size_t kMaxInputBytes = 8 * 1024 * 1024;
 
 namespace {
 

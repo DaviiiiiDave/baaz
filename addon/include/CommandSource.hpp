@@ -31,7 +31,9 @@ class CommandSource {
 public:
     // Reads %USERPROFILE%\.baaz\commands\*.xml (re-read only when a file time changes), picks the
     // export that fits the live menu bar best, checks that Archicad has not saved a newer scheme,
-    // and links. Without a usable export the result is a single Help line, or empty without any export.
+    // and links. Without a usable export, or when nothing links, the result is a single Help line
+    // asking for a new export; without any export it is empty. When the check for a newer scheme is
+    // not possible the commands are offered together with one "cannot check" Help line per session.
     static std::vector<SearchItem> BuildCommandIndex(HWND frame, const std::vector<DynamicList>& lists);
     // Fills the item's menu path again and posts WM_COMMAND only if the live item is still an
     // enabled item with the same id.
@@ -40,6 +42,8 @@ public:
     struct CachedExport {
         std::wstring path;
         FILETIME time = {};
+        unsigned long long size = 0;
+        bool readFailed = false;   // too large or unreadable: read again at the next refresh
         std::vector<MenuNode> bar;
     };
 
@@ -59,7 +63,7 @@ public:
 
 private:
     static Locations CurrentLocations();
-    static const std::vector<CachedExport>& LoadExports(const std::wstring& folder);
+    static std::vector<CachedExport> LoadExports(const std::wstring& folder);
 
     static std::vector<CachedExport> s_exports;
     static bool s_checkNoted;

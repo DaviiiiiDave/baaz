@@ -37,6 +37,7 @@ add_executable(test_live_menu
     ../addon/src/CommandSource.cpp
     ../addon/src/MenuLink.cpp
     ../addon/src/SchemeReader.cpp
+    ../addon/src/Settings.cpp
 )
 target_include_directories(test_live_menu PRIVATE ../addon/include)
 target_compile_definitions(test_live_menu PRIVATE UNICODE _UNICODE)

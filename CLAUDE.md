@@ -21,6 +21,8 @@ Every change must follow the rules in [REVIEW.md](REVIEW.md). They are imported 
 | `addon/src/NavigatorIndexer.cpp` | Views, layouts and layer combinations of the open project. |
 | `addon/src/CommandExecutor.cpp` | Runs a result: tool, view, layout, layer combination, settings. |
 | `addon/src/SchemeReader.cpp` | Reads an exported command-layout scheme (XML) into a menu tree; no Archicad API. |
+| `addon/src/MenuLink.cpp` | Links the names of a menu tree to the positions in the live menu bar; no Archicad API. |
+| `addon/src/CommandSource.cpp` | Win32 menu bar (`LiveMenu`), loads the exports, checks they are current, runs a command by `WM_COMMAND`; no Archicad API. |
 | `addon/src/Settings.cpp`, `SettingsDialog.cpp` | `%USERPROFILE%\.baaz\config.json` and its dialog. |
 | `addon/resources/` | `RINT/AddOn.grc` (name), `RFIX/AddOnFix.grc` (MDID), `RFIX.win/AddOnMain.rc2`. |
 | `tests/` | Native tests, built without the Archicad API. `test_sendinput_stub.hpp` records synthesized keys. |

@@ -5,6 +5,9 @@
 
 namespace Baaz {
 
+// Larger exports are rejected
+constexpr size_t kMaxInputBytes = 8 * 1024 * 1024;
+
 enum class MenuNodeType { Item, Separator, Popup };
 
 struct MenuNode {
