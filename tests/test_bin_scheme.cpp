@@ -456,18 +456,37 @@ static bool SameStructure(const std::vector<MenuNode>& a, const std::vector<Menu
     return true;
 }
 
+static std::vector<std::string> SplitList(const std::string& list) {
+    std::vector<std::string> parts;
+    size_t start = 0;
+    while (true) {
+        size_t end = list.find(';', start);
+        parts.push_back(list.substr(start, end == std::string::npos ? end : end - start));
+        if (end == std::string::npos) return parts;
+        start = end + 1;
+    }
+}
+
+// The paths come only from the environment: ';'-separated lists of equal length, pairs of the same state
 void TestRealFilesMatchTheirExport() {
-    std::string binPath, xmlPath;
-    if (!EnvValue("BAAZ_TEST_SCHEME_BIN", binPath) || !EnvValue("BAAZ_TEST_SCHEME_XML", xmlPath)) {
-        std::cout << "[SKIP] TestRealFilesMatchTheirExport (set BAAZ_TEST_SCHEME_BIN and BAAZ_TEST_SCHEME_XML to a .bin and the export of the same state)\n";
+    std::string binList, xmlList;
+    if (!EnvValue("BAAZ_TEST_SCHEME_BIN", binList) || !EnvValue("BAAZ_TEST_SCHEME_XML", xmlList)) {
+        std::cout << "[SKIP] real scheme files not configured\n";
         return;
     }
-    BinScheme scheme;
-    assert(BinSchemeReader::Read(ReadWholeFile(binPath), scheme));
-    std::vector<MenuNode> exported = SchemeReader::ReadFloorPlanMenuBar(ReadWholeFile(xmlPath));
-    assert(!exported.empty());
-    assert(SameStructure(scheme.floorPlanBar, exported));
-    std::cout << "[PASS] TestRealFilesMatchTheirExport (" << scheme.floorPlanBar.size() << " top-level menus)\n";
+    std::vector<std::string> binPaths = SplitList(binList);
+    std::vector<std::string> xmlPaths = SplitList(xmlList);
+    assert(binPaths.size() == xmlPaths.size());
+    for (size_t i = 0; i < binPaths.size(); ++i) {
+        assert(!binPaths[i].empty() && !xmlPaths[i].empty());
+        BinScheme scheme;
+        assert(BinSchemeReader::Read(ReadWholeFile(binPaths[i]), scheme));
+        std::vector<MenuNode> exported = SchemeReader::ReadFloorPlanMenuBar(ReadWholeFile(xmlPaths[i]));
+        assert(!exported.empty());
+        assert(SameStructure(scheme.floorPlanBar, exported));
+        std::cout << "[PASS] TestRealFilesMatchTheirExport pair " << (i + 1) << " (" << scheme.floorPlanBar.size()
+                  << " top-level menus)\n";
+    }
 }
 
 int main() {

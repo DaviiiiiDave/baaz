@@ -52,9 +52,9 @@ namespace Baaz {
 //   AStr          := u32:n, then n bytes
 //   ContextSetting:= 02 00 AStr(36-character GUID) u32:0
 //
-// The records are densely packed: an Item is 29 bytes (tag included), a Separator 26. Items seen
-// 29 bytes apart follow each other directly, 55 bytes apart have a Separator between them; no
-// record type has either of these lengths.
+// An Item record is 29 bytes (tag included) and a Separator 26. Two Items "29 bytes apart" are
+// Item after Item, "55 bytes apart" are Item then Separator; there is no 55-byte record type.
+// Other spacings (32 and 58 bytes) occur only inside toolbar blocks, which the reader skips.
 //
 // An "IR" refers to an "ID" defined anywhere in the file: at the top level, or inline in any bar
 // (the text bar refers to menus defined inline in the floor plan bar). References are resolved
