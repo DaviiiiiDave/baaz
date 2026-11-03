@@ -1,6 +1,7 @@
 // Keep assert() active in Release builds too
 #undef NDEBUG
 #include "CommandSource.hpp"
+#include "bin_scheme_builder.hpp"
 #include <cassert>
 #include <filesystem>
 #include <fstream>
@@ -117,23 +118,51 @@ static SearchItem CommandItem(unsigned liveId, std::vector<int> position) {
     item.menuPosition = std::move(position);
     return item;
 }
-
 // --- Temporary commands folder and %APPDATA% root ------------------------------------------
 
-static const char* const kSchemeMarker = "6FCD168F-A26C-4547-AF9D-ED9A5FC54DD7";
-static const char* const kExportXml =
-    "<Scheme><GlobalSettings><CommandLayout>"
-    "<MenuBar ID=\"B\" menubarguid=\"2085E4D3-5694-4BB9-ACAC-3AED5BE50091\" name=\"x\">"
-    "<Menu ID=\"M\" title=\"&amp;Test\">"
-    "<Item command=\"1-0x0-0x0\" comment=\"Alpha\"/><Separator/><Item command=\"2-0x0-0x0\" comment=\"Beta\"/>"
-    "</Menu></MenuBar></CommandLayout></GlobalSettings></Scheme>";
+static const char* const kBinGuid = "01234567-89AB-CDEF-0123-456789ABCDEF";
+static const char* const kGuidA = "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA";
+static const char* const kGuidB = "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB";
+static const wchar_t* const kArchicadFolder = L"Archicad 29 TST R1";
 
-// The export with the menu "Test" renamed, so it no longer fits the live menu bar
-static std::string ExportForOtherMenuBar() {
-    std::string xml(kExportXml);
-    xml.replace(xml.find("&amp;Test"), 9, "Other");
-    return xml;
+static std::string ExportXml(const std::string& menus) {
+    return std::string("<Scheme componentType=\"") + kComponentType + "\"><GlobalSettings><CommandLayout>"
+           "<MenuBar ID=\"B\" menubarguid=\"2085E4D3-5694-4BB9-ACAC-3AED5BE50091\" name=\"x\">" + menus +
+           "</MenuBar></CommandLayout></GlobalSettings></Scheme>";
 }
+
+static std::string XmlItem(unsigned number, const char* name) {
+    return "<Item command=\"" + std::to_string(number) + "-0x0-0x0\" comment=\"" + name + "\"/>";
+}
+
+static const std::string kExportXml = ExportXml("<Menu ID=\"M\" title=\"&amp;Test\">" + XmlItem(1, "Alpha") +
+                                                 "<Separator/>" + XmlItem(2, "Beta") + "</Menu>");
+
+static std::string Replaced(std::string text, const std::string& from, const std::string& to) {
+    const size_t at = text.find(from);
+    assert(at != std::string::npos);
+    return text.replace(at, from.size(), to);
+}
+
+// The export with the menu "Test" renamed (to a title of the same length), so it no longer fits the live menu bar
+static std::string ExportForOtherMenuBar() { return Replaced(kExportXml, "&amp;Test", "&amp;Othr"); }
+
+static std::vector<std::string> TestEntries() { return { Item(1, 0, 0), Separator(), Item(2, 0, 0) }; }
+
+static std::string BinOf(const std::vector<std::string>& menus, const char* guid = kBinGuid) {
+    FileParts parts;
+    parts.guid = guid;
+    parts.bars = { Bar(kFloorGuid, menus) };
+    return Serialize(parts);
+}
+
+// The menu "Test" of the live window; the title carries an access key, as in a real file
+static std::string TestBin(const std::vector<std::string>& entries = TestEntries(), const char* guid = kBinGuid) {
+    return BinOf({ Menu(L"M", L"&Test", entries) }, guid);
+}
+
+// A file with the scheme marker that the reader does not understand
+static std::string UnreadableBin() { return std::string("xx") + kComponentType; }
 
 static FILETIME TimeAt(int secondsFromBase) {
     ULARGE_INTEGER ticks;
@@ -170,27 +199,50 @@ public:
     std::filesystem::path Root() const { return m_root; }
     std::filesystem::path Commands() const { return m_root / L"commands"; }
     std::filesystem::path AppData() const { return m_root / L"appdata"; }
+    std::filesystem::path ArchicadFolder(const wchar_t* folder = kArchicadFolder) const {
+        return AppData() / L"GRAPHISOFT" / folder;
+    }
     void WriteExport(int secondsFromBase, const std::string& xml = kExportXml) const {
         WriteTestFile(Commands() / L"export.xml", xml, secondsFromBase);
     }
     // The scheme files of the running Archicad, two folders below its folder
-    std::filesystem::path SchemePath(const wchar_t* archicadFolder = L"Archicad 29 TST R1") const {
-        return AppData() / L"GRAPHISOFT" / archicadFolder / L"Workenv" / L"Commands" / L"layout.bin";
+    std::filesystem::path SchemePath(const wchar_t* name = L"layout.bin", const wchar_t* folder = kArchicadFolder) const {
+        return ArchicadFolder(folder) / L"Workenv" / L"Commands" / name;
     }
-    void WriteScheme(const std::string& contents, int secondsFromBase, const wchar_t* archicadFolder = L"Archicad 29 TST R1") const {
-        WriteTestFile(SchemePath(archicadFolder), contents, secondsFromBase);
+    void WriteBin(const std::string& bytes, int secondsFromBase, const wchar_t* name = L"layout.bin",
+                  const wchar_t* folder = kArchicadFolder) const {
+        WriteTestFile(SchemePath(name, folder), bytes, secondsFromBase);
     }
-    // An export that is newer than the scheme, so the export counts as current
+    // A profile of the work environment folder `directory`, which holds no ProfileSet.xml
+    void WriteProfile(const std::string& xml, int secondsFromBase = 0, const wchar_t* directory = L"Recent",
+                      const wchar_t* file = L"Profile.xml") const {
+        WriteTestFile(ArchicadFolder() / directory / L"Profile" / file, xml, secondsFromBase);
+    }
+    // The named profiles sit next to a ProfileSet.xml; they say nothing about the one in use
+    void WriteNamedProfile(const std::string& xml) const {
+        WriteTestFile(ArchicadFolder() / L"Named" / L"ProfileSet.xml", "<ProfileSet/>", 0);
+        WriteTestFile(ArchicadFolder() / L"Named" / L"Profile" / L"Profile_1.xml", xml, 0);
+    }
     void WriteCurrent() const {
-        WriteExport(60);
-        WriteScheme(std::string(kSchemeMarker), 0);
+        WriteExport(0);
+        WriteBin(TestBin(), 0);
     }
 
-    void CreateArchicadFolder() const { std::filesystem::create_directories(AppData() / L"GRAPHISOFT" / L"Archicad 29 TST R1"); }
+    void CreateArchicadFolder() const { std::filesystem::create_directories(ArchicadFolder()); }
 
 private:
     std::filesystem::path m_root;
 };
+
+// A profile naming the given command schemes next to a scheme of another component
+static std::string ProfileXml(const std::vector<const char*>& commandSchemeGuids) {
+    std::string xml = "<Profile guid=\"CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC\">"
+                      "<SchemeRef componentType=\"D3EC122F-0A7F-4B14-94D0-0A6B7FFA66C3\" guid=\"DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD\" name=\"\"/>";
+    for (const char* guid : commandSchemeGuids) {
+        xml += std::string("<SchemeRef componentType=\"") + kComponentType + "\" guid=\"" + guid + "\" name=\"x\"/>";
+    }
+    return xml + "</Profile>";
+}
 
 // Holds a file open without sharing, like a program that is writing to it
 class FileLock {
@@ -207,7 +259,33 @@ private:
     HANDLE m_file;
 };
 
-static const std::wstring kOutOfDate = L"Command list is out of date. Export the command scheme again (see README).";
+static CommandIndex IndexOf(HWND frame) { return CommandSource::BuildCommandIndex(frame, {}); }
+
+static std::vector<std::wstring> Titles(const std::vector<SearchItem>& items) {
+    std::vector<std::wstring> titles;
+    for (const SearchItem& item : items) titles.push_back(item.title);
+    return titles;
+}
+
+static const std::vector<std::wstring> kAlphaBeta = { L"Alpha", L"Beta" };
+
+// The Test menu of kExportXml plus a submenu "Sub" holding the given entries
+static std::string ExportWithSub(const std::string& subEntries) {
+    std::string xml(kExportXml);
+    const std::string sub = subEntries.empty() ? "<PopupItem><Menu ID=\"S\" title=\"Sub\"/></PopupItem>"
+                                               : "<PopupItem><Menu ID=\"S\" title=\"Sub\">" + subEntries + "</Menu></PopupItem>";
+    xml.insert(xml.find("</Menu>"), sub);
+    return xml;
+}
+
+static const std::string kExportWithSub = ExportWithSub(XmlItem(3, "S1") + XmlItem(4, "S2"));
+
+// The Test menu plus the submenu "Sub" of the nested live window
+static std::string BinWithSub(const std::vector<std::string>& subEntries, const char* guid = kBinGuid) {
+    std::vector<std::string> entries = TestEntries();
+    entries.push_back(Popup(Menu(L"S", L"Sub", subEntries)));
+    return TestBin(entries, guid);
+}
 
 // --- Tests -----------------------------------------------------------------------------------
 
@@ -264,78 +342,6 @@ void TestRunRefusesWrongKindOrPosition() {
     std::cout << "[PASS] TestRunRefusesWrongKindOrPosition\n";
 }
 
-void TestStatusLineWhenStale() {
-    TestFrame frame(Fill::Normal);
-    TestFolders folders;
-    folders.WriteExport(0);
-    folders.WriteScheme(std::string("xx") + kSchemeMarker, 60);
-    std::vector<SearchItem> items = CommandSource::BuildCommandIndex(frame.Hwnd(), {});
-    assert(items.size() == 1);
-    assert(items[0].kind == ItemKind::Help);
-    assert(items[0].title == kOutOfDate);
-    std::cout << "[PASS] TestStatusLineWhenStale\n";
-}
-
-void TestOffersCommandsWhenCurrent() {
-    TestFrame frame(Fill::Normal);
-    TestFolders folders;
-    folders.WriteExport(60);
-    folders.WriteScheme(std::string("xx") + kSchemeMarker, 0);
-    std::vector<SearchItem> items = CommandSource::BuildCommandIndex(frame.Hwnd(), {});
-    assert(items.size() == 2);
-    assert(items[0].kind == ItemKind::Command && items[0].title == L"Alpha");
-    assert(items[0].liveId == 255 && items[0].enabled && (items[0].menuPosition == std::vector<int>{ 0, 0 }));
-    assert(items[1].title == L"Beta" && items[1].liveId == 300 && (items[1].menuPosition == std::vector<int>{ 0, 2 }));
-    assert(CommandSource::Run(items[1], frame.Hwnd()));
-    Pump();
-    assert((g_commands == std::vector<unsigned>{ 300 }));
-    std::cout << "[PASS] TestOffersCommandsWhenCurrent\n";
-}
-
-// Without a scheme file to compare with, the export cannot be called current: commands plus the note
-static void AssertCommandsWithCannotCheckNote(HWND frame) {
-    std::vector<SearchItem> items = CommandSource::BuildCommandIndex(frame, {});
-    assert(items.size() == 3);
-    assert(items[0].kind == ItemKind::Command && items[1].kind == ItemKind::Command);
-    assert(items[2].kind == ItemKind::Help && items[2].title == L"Command list: cannot check whether the export is current");
-}
-
-void TestShiftedTopLevelPositionsAreFollowed() {
-    TestFrame frame(Fill::Normal, true);   // live bar: Extra, Test, untitled slot; the export has Test only
-    TestFolders folders;
-    folders.WriteCurrent();
-    std::vector<SearchItem> items = CommandSource::BuildCommandIndex(frame.Hwnd(), {});
-    assert(items.size() == 2);
-    assert(items[0].title == L"Alpha" && items[0].liveId == 255 && (items[0].menuPosition == std::vector<int>{ 1, 0 }));
-    assert(items[1].title == L"Beta" && (items[1].menuPosition == std::vector<int>{ 1, 2 }));
-    assert(CommandSource::Run(items[0], frame.Hwnd()));
-    Pump();
-    assert((g_commands == std::vector<unsigned>{ 255 }));
-    frame.ChangeFill(Fill::ChangedId);
-    assert(!CommandSource::Run(items[0], frame.Hwnd()));
-    Pump();
-    assert(g_commands.size() == 1);
-    std::cout << "[PASS] TestShiftedTopLevelPositionsAreFollowed\n";
-}
-
-void TestSchemeFileWithoutMarkerIsUnknown() {
-    TestFrame frame(Fill::Normal);
-    TestFolders folders;
-    folders.WriteExport(60);
-    folders.WriteScheme("a newer file that is not a command layout", 120);
-    AssertCommandsWithCannotCheckNote(frame.Hwnd());
-    std::cout << "[PASS] TestSchemeFileWithoutMarkerIsUnknown\n";
-}
-
-void TestArchicadFolderWithoutSchemeFilesIsUnknown() {
-    TestFrame frame(Fill::Normal);
-    TestFolders folders;
-    folders.WriteExport(60);
-    folders.CreateArchicadFolder();
-    AssertCommandsWithCannotCheckNote(frame.Hwnd());
-    std::cout << "[PASS] TestArchicadFolderWithoutSchemeFilesIsUnknown\n";
-}
-
 void TestRunRefusesDisabledFrame() {
     TestFrame frame(Fill::Normal);
     EnableWindow(frame.Hwnd(), FALSE);   // a modal dialog is open on top of it
@@ -347,28 +353,6 @@ void TestRunRefusesDisabledFrame() {
     Pump();
     assert((g_commands == std::vector<unsigned>{ 255 }));
     std::cout << "[PASS] TestRunRefusesDisabledFrame\n";
-}
-
-void TestRunAfterMenuRebuiltSinceIndexing() {
-    TestFrame frame(Fill::Normal);
-    TestFolders folders;
-    folders.WriteCurrent();
-    std::vector<SearchItem> items = CommandSource::BuildCommandIndex(frame.Hwnd(), {});
-    assert(items.size() == 2);
-    frame.ChangeFill(Fill::ChangedId);
-    assert(!CommandSource::Run(items[0], frame.Hwnd()));
-    frame.ChangeFill(Fill::Grayed);
-    assert(!CommandSource::Run(items[0], frame.Hwnd()));
-    frame.ChangeFill(Fill::Shifted);
-    assert(!CommandSource::Run(items[0], frame.Hwnd()));
-    assert(!CommandSource::Run(items[1], frame.Hwnd()));
-    Pump();
-    assert(g_commands.empty());
-    frame.ChangeFill(Fill::Normal);
-    assert(CommandSource::Run(items[0], frame.Hwnd()));
-    Pump();
-    assert((g_commands == std::vector<unsigned>{ 255 }));
-    std::cout << "[PASS] TestRunAfterMenuRebuiltSinceIndexing\n";
 }
 
 void TestNestedPopups() {
@@ -388,11 +372,69 @@ void TestNestedPopups() {
     std::cout << "[PASS] TestNestedPopups\n";
 }
 
+void TestOffersCommandsWhenCurrent() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    folders.WriteCurrent();
+    const CommandIndex index = IndexOf(frame.Hwnd());
+    assert(index.state == CommandState::Ready && index.unnamed == 0);
+    const std::vector<SearchItem>& items = index.commands;
+    assert(items.size() == 2);
+    assert(items[0].kind == ItemKind::Command && items[0].title == L"Alpha" && items[0].tag == L"Test");
+    assert(items[0].liveId == 255 && items[0].enabled && (items[0].menuPosition == std::vector<int>{ 0, 0 }));
+    assert(items[1].title == L"Beta" && items[1].liveId == 300 && (items[1].menuPosition == std::vector<int>{ 0, 2 }));
+    assert(index.workEnvironment.liveId == 0);   // 7682 is not in this menu
+    assert(CommandSource::Run(items[1], frame.Hwnd()));
+    Pump();
+    assert((g_commands == std::vector<unsigned>{ 300 }));
+    std::cout << "[PASS] TestOffersCommandsWhenCurrent\n";
+}
+
+void TestShiftedTopLevelPositionsAreFollowed() {
+    TestFrame frame(Fill::Normal, true);   // live bar: Extra, Test, untitled slot; the scheme has Test only
+    TestFolders folders;
+    folders.WriteCurrent();
+    std::vector<SearchItem> items = IndexOf(frame.Hwnd()).commands;
+    assert(items.size() == 2);
+    assert(items[0].title == L"Alpha" && items[0].liveId == 255 && (items[0].menuPosition == std::vector<int>{ 1, 0 }));
+    assert(items[1].title == L"Beta" && (items[1].menuPosition == std::vector<int>{ 1, 2 }));
+    assert(CommandSource::Run(items[0], frame.Hwnd()));
+    Pump();
+    assert((g_commands == std::vector<unsigned>{ 255 }));
+    frame.ChangeFill(Fill::ChangedId);
+    assert(!CommandSource::Run(items[0], frame.Hwnd()));
+    Pump();
+    assert(g_commands.size() == 1);
+    std::cout << "[PASS] TestShiftedTopLevelPositionsAreFollowed\n";
+}
+
+void TestRunAfterMenuRebuiltSinceIndexing() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    folders.WriteCurrent();
+    std::vector<SearchItem> items = IndexOf(frame.Hwnd()).commands;
+    assert(items.size() == 2);
+    frame.ChangeFill(Fill::ChangedId);
+    assert(!CommandSource::Run(items[0], frame.Hwnd()));
+    frame.ChangeFill(Fill::Grayed);
+    assert(!CommandSource::Run(items[0], frame.Hwnd()));
+    frame.ChangeFill(Fill::Shifted);
+    assert(!CommandSource::Run(items[0], frame.Hwnd()));
+    assert(!CommandSource::Run(items[1], frame.Hwnd()));
+    Pump();
+    assert(g_commands.empty());
+    frame.ChangeFill(Fill::Normal);
+    assert(CommandSource::Run(items[0], frame.Hwnd()));
+    Pump();
+    assert((g_commands == std::vector<unsigned>{ 255 }));
+    std::cout << "[PASS] TestRunAfterMenuRebuiltSinceIndexing\n";
+}
+
 void TestIndexOffersGreyedItemDisabled() {
     TestFrame frame(Fill::Grayed);
     TestFolders folders;
     folders.WriteCurrent();
-    std::vector<SearchItem> items = CommandSource::BuildCommandIndex(frame.Hwnd(), {});
+    std::vector<SearchItem> items = IndexOf(frame.Hwnd()).commands;
     assert(items.size() == 2);
     assert(items[0].kind == ItemKind::Command && items[0].title == L"Alpha" && !items[0].enabled);
     assert(items[1].enabled);
@@ -402,108 +444,317 @@ void TestIndexOffersGreyedItemDisabled() {
     std::cout << "[PASS] TestIndexOffersGreyedItemDisabled\n";
 }
 
-static std::vector<std::wstring> Titles(const std::vector<SearchItem>& items) {
-    std::vector<std::wstring> titles;
-    for (const SearchItem& item : items) titles.push_back(item.title);
-    return titles;
+// --- Names: the export, found by its marker, the newest that fits ------------------------
+
+void TestExportFoundBySchemeMarker() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    folders.WriteBin(TestBin(), 0);
+    // Folder and file names do not matter, the marker does
+    WriteTestFile(folders.Commands() / L"Exported profile" / L"Commands" / L"x_123.xml", kExportXml, 10);
+    // A newer XML without the marker is not an export, whatever names it holds
+    const std::string notAnExport = Replaced(Replaced(kExportXml, kComponentType, "0FCD168F-A26C-4547-AF9D-ED9A5FC54DD7"), "Alpha", "Wrong");
+    WriteTestFile(folders.Commands() / L"other.xml", notAnExport, 20);
+    assert(Titles(IndexOf(frame.Hwnd()).commands) == kAlphaBeta);
+    std::cout << "[PASS] TestExportFoundBySchemeMarker\n";
 }
 
-// The Test menu of kExportXml plus a submenu "Sub" holding the given entries
-static std::string ExportWithSub(const std::string& subEntries) {
-    std::string xml(kExportXml);
-    const std::string sub = subEntries.empty() ? "<PopupItem><Menu ID=\"S\" title=\"Sub\"/></PopupItem>"
-                                               : "<PopupItem><Menu ID=\"S\" title=\"Sub\">" + subEntries + "</Menu></PopupItem>";
-    xml.insert(xml.find("</Menu>"), sub);
-    return xml;
+void TestNewestFittingExportGivesNames() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    folders.WriteBin(TestBin(), 0);
+    WriteTestFile(folders.Commands() / L"one" / L"old.xml", Replaced(kExportXml, "Alpha", "Old name"), 10);
+    WriteTestFile(folders.Commands() / L"two" / L"new.xml", Replaced(kExportXml, "Alpha", "New name"), 20);
+    // Newest of all, but its menu bar is another one: it must not give names
+    WriteTestFile(folders.Commands() / L"three" / L"other_bar.xml", Replaced(ExportForOtherMenuBar(), "Alpha", "Wrong"), 30);
+    assert((Titles(IndexOf(frame.Hwnd()).commands) == std::vector<std::wstring>{ L"New name", L"Beta" }));
+    std::cout << "[PASS] TestNewestFittingExportGivesNames\n";
 }
 
-static const std::vector<std::wstring> kAlphaBeta = { L"Alpha", L"Beta" };
-
-static void AssertSingleOutOfDateLine(const std::vector<SearchItem>& items) {
-    assert(items.size() == 1 && items[0].kind == ItemKind::Help && items[0].title == kOutOfDate);
+void TestUnnamedCommandIsCountedNotOffered() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    folders.WriteBin(TestBin(), 0);
+    folders.WriteExport(0, ExportXml("<Menu ID=\"M\" title=\"&amp;Test\">" + XmlItem(1, "Alpha") + "</Menu>"));   // no name for 2
+    const CommandIndex index = IndexOf(frame.Hwnd());
+    assert(index.state == CommandState::NewCommands && index.unnamed == 1);
+    assert((Titles(index.commands) == std::vector<std::wstring>{ L"Alpha" }));
+    std::cout << "[PASS] TestUnnamedCommandIsCountedNotOffered\n";
 }
 
-void TestExportChoice() {
-    {   // Neither a file without the schema nor an export of another menu bar gets in the way, whatever the names
-        TestFrame frame(Fill::Normal);
-        TestFolders folders;
-        folders.WriteScheme(std::string(kSchemeMarker), 0);
-        WriteTestFile(folders.Commands() / L"a_garbage.xml", "this is not a scheme", 60);
-        WriteTestFile(folders.Commands() / L"b_other.xml", ExportForOtherMenuBar(), 60);
-        WriteTestFile(folders.Commands() / L"c_good.xml", kExportXml, 60);
-        assert(Titles(CommandSource::BuildCommandIndex(frame.Hwnd(), {})) == kAlphaBeta);
-    }
-    {
-        TestFrame frame(Fill::Normal);
-        TestFolders folders;
-        folders.WriteScheme(std::string(kSchemeMarker), 0);
-        WriteTestFile(folders.Commands() / L"a_good.xml", kExportXml, 60);
-        WriteTestFile(folders.Commands() / L"b_other.xml", ExportForOtherMenuBar(), 60);
-        WriteTestFile(folders.Commands() / L"c_garbage.xml", "this is not a scheme", 60);
-        assert(Titles(CommandSource::BuildCommandIndex(frame.Hwnd(), {})) == kAlphaBeta);
-    }
-    {   // Two exports that fit equally well are lifted by a third one that links more
-        TestFrame nested(Fill::Nested);
-        TestFolders folders;
-        folders.WriteScheme(std::string(kSchemeMarker), 0);
-        WriteTestFile(folders.Commands() / L"a_tie.xml", ExportWithSub(""), 60);
-        WriteTestFile(folders.Commands() / L"b_tie.xml", ExportWithSub(""), 60);
-        assert(CommandSource::BuildCommandIndex(nested.Hwnd(), {}).size() == 1);   // the tie: one status line
-        WriteTestFile(folders.Commands() / L"c_best.xml",
-                      ExportWithSub("<Item command=\"3-0x0-0x0\" comment=\"S1\"/><Item command=\"4-0x0-0x0\" comment=\"S2\"/>"), 60);
-        assert((Titles(CommandSource::BuildCommandIndex(nested.Hwnd(), {})) ==
-                std::vector<std::wstring>{ L"Alpha", L"Beta", L"S1", L"S2" }));
-    }
-    {   // Several exports, none of which fits: the status line, not a tie result
-        TestFrame frame(Fill::Normal);
-        TestFolders folders;
-        folders.WriteScheme(std::string(kSchemeMarker), 0);
-        WriteTestFile(folders.Commands() / L"a_other.xml", ExportForOtherMenuBar(), 60);
-        WriteTestFile(folders.Commands() / L"b_other.xml", ExportForOtherMenuBar(), 60);
-        AssertSingleOutOfDateLine(CommandSource::BuildCommandIndex(frame.Hwnd(), {}));
-    }
-    std::cout << "[PASS] TestExportChoice\n";
+void TestPlaceholderIsNeverCounted() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    // Archicad replaces 23040 and 9472 at run time; the export has no name for them
+    folders.WriteBin(TestBin({ Item(1, 0, 0), Separator(), Item(2, 0, 0), Item(23040, 0, 0), Item(9472, 0, 0) }), 0);
+    folders.WriteExport(0);
+    const CommandIndex index = IndexOf(frame.Hwnd());
+    assert(index.state == CommandState::Ready && index.unnamed == 0);
+    assert(Titles(index.commands) == kAlphaBeta);
+    std::cout << "[PASS] TestPlaceholderIsNeverCounted\n";
 }
 
-void TestExtraEntryGivesStatusLine() {
-    TestFrame frame(Fill::ExtraItem);
+// The export lists Lineal (1557) in the Test menu; the scheme has moved it to the Extra menu
+void TestMovedCommandKeepsItsName() {
+    TestFrame frame(Fill::Normal, true);
+    TestFolders folders;
+    folders.WriteExport(0, ExportXml("<Menu ID=\"M\" title=\"&amp;Test\">" + XmlItem(1, "Alpha") + "<Separator/>" +
+                                      XmlItem(2, "Beta") + XmlItem(1557, "Lineal") + "</Menu>"));
+    folders.WriteBin(BinOf({ Menu(L"E", L"&Extra", { Item(1557, 0, 0) }), Menu(L"M", L"&Test", TestEntries()) }), 0);
+    const std::vector<SearchItem> items = IndexOf(frame.Hwnd()).commands;
+    assert((Titles(items) == std::vector<std::wstring>{ L"Lineal", L"Alpha", L"Beta" }));
+    assert(items[0].liveId == 700 && (items[0].menuPosition == std::vector<int>{ 0, 0 }) && items[0].tag == L"Extra");
+    std::cout << "[PASS] TestMovedCommandKeepsItsName\n";
+}
+
+// The export is older than the scheme: a menu change since the export is no reason to stop offering
+void TestMenuChangeWithoutExportStillOffers() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    folders.WriteExport(0);
+    folders.WriteBin(TestBin({ Item(2, 0, 0), Separator(), Item(1, 0, 0) }), 60);   // the two commands swapped
+    const CommandIndex index = IndexOf(frame.Hwnd());
+    assert(index.state == CommandState::Ready);
+    assert((Titles(index.commands) == std::vector<std::wstring>{ L"Beta", L"Alpha" }));
+    assert(index.commands[0].liveId == 255 && index.commands[1].liveId == 300);
+    std::cout << "[PASS] TestMenuChangeWithoutExportStillOffers\n";
+}
+
+// The scheme still lists a menu of an add-on that is not loaded; the export (and the live menu) leave it out
+void TestUnloadedAddOnItemsDoNotBlockLinking() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    folders.WriteExport(0);
+    std::vector<std::string> entries = TestEntries();
+    entries.push_back(Popup(Menu(L"H", L"Hidden", { Item(9, 5, 6) })));
+    folders.WriteBin(TestBin(entries), 0);
+    const CommandIndex index = IndexOf(frame.Hwnd());
+    assert(index.state == CommandState::Ready && Titles(index.commands) == kAlphaBeta);
+    std::cout << "[PASS] TestUnloadedAddOnItemsDoNotBlockLinking\n";
+}
+
+// --- Which scheme file is the active one -----------------------------------------------------
+
+void TestSchemeChosenByFitThenTime() {
+    TestFrame frame(Fill::Nested);
+    TestFolders folders;
+    folders.WriteExport(0, kExportWithSub);
+    folders.WriteBin(BinWithSub({}), 60, L"poor.bin");
+    folders.WriteBin(BinWithSub({ Item(3, 0, 0), Item(4, 0, 0) }), 10, L"rich.bin");
+    // The older file fits better (4 commands against 2): it wins although the other one is newer
+    assert((Titles(IndexOf(frame.Hwnd()).commands) == std::vector<std::wstring>{ L"Alpha", L"Beta", L"S1", L"S2" }));
+    // Equal fit: the newer file wins
+    folders.WriteBin(BinWithSub({ Item(4, 0, 0), Item(3, 0, 0) }), 70, L"newer.bin");
+    assert((Titles(IndexOf(frame.Hwnd()).commands) == std::vector<std::wstring>{ L"Alpha", L"Beta", L"S2", L"S1" }));
+    std::cout << "[PASS] TestSchemeChosenByFitThenTime\n";
+}
+
+void TestTiedSchemesWithSameTimeOfferNothing() {
+    TestFrame frame(Fill::Nested);
+    TestFolders folders;
+    folders.WriteExport(0, kExportWithSub);
+    folders.WriteBin(BinWithSub({ Item(3, 0, 0), Item(4, 0, 0) }), 10, L"one.bin");
+    folders.WriteBin(BinWithSub({ Item(4, 0, 0), Item(3, 0, 0) }), 10, L"two.bin");
+    const CommandIndex index = IndexOf(frame.Hwnd());
+    assert(index.commands.empty() && index.state == CommandState::Unreadable);
+    std::cout << "[PASS] TestTiedSchemesWithSameTimeOfferNothing\n";
+}
+
+void TestSchemesOfSeveralArchicadFoldersAreCandidates() {
+    TestFrame frame(Fill::Nested);
+    TestFolders folders;
+    folders.WriteExport(0, kExportWithSub);
+    folders.WriteBin(BinWithSub({ Item(3, 0, 0), Item(4, 0, 0) }), 10, L"layout.bin", L"Archicad 29 DEU R1");
+    folders.WriteBin(BinWithSub({ Item(4, 0, 0), Item(3, 0, 0) }), 20, L"layout.bin", L"Archicad 29 INT R1");
+    folders.WriteBin(BinWithSub({}), 90, L"layout.bin", L"Archicad 30 INT R1");   // another version: not a candidate
+    assert((Titles(IndexOf(frame.Hwnd()).commands) == std::vector<std::wstring>{ L"Alpha", L"Beta", L"S2", L"S1" }));
+    std::cout << "[PASS] TestSchemesOfSeveralArchicadFoldersAreCandidates\n";
+}
+
+void TestBinWithoutMarkerIsNotACandidate() {
+    TestFrame frame(Fill::Normal);
     TestFolders folders;
     folders.WriteCurrent();
-    AssertSingleOutOfDateLine(CommandSource::BuildCommandIndex(frame.Hwnd(), {}));
-    std::cout << "[PASS] TestExtraEntryGivesStatusLine\n";
+    folders.WriteBin("a newer file that is not a command scheme", 120, L"other.bin");
+    assert(Titles(IndexOf(frame.Hwnd()).commands) == kAlphaBeta);
+    std::cout << "[PASS] TestBinWithoutMarkerIsNotACandidate\n";
+}
+
+// A newer file the reader does not understand may be the scheme in use (an Archicad update changed the format)
+void TestNewerUnreadableSchemeOffersNothing() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    folders.WriteCurrent();
+    folders.WriteBin(UnreadableBin(), 60, L"newer.bin");
+    CommandIndex index = IndexOf(frame.Hwnd());
+    assert(index.commands.empty() && index.state == CommandState::Unreadable);
+    folders.WriteBin(UnreadableBin(), -60, L"newer.bin");   // older than the readable one: no doubt
+    assert(IndexOf(frame.Hwnd()).state == CommandState::Ready);
+    std::cout << "[PASS] TestNewerUnreadableSchemeOffersNothing\n";
+}
+
+// Scheme A (older) names Beta, scheme B (newer) names Gamma, both fit equally; the export names 1, 2 and 3
+static void WriteSchemesAAndB(const TestFolders& folders) {
+    folders.WriteExport(0, ExportXml("<Menu ID=\"M\" title=\"&amp;Test\">" + XmlItem(1, "Alpha") + "<Separator/>" +
+                                      XmlItem(2, "Beta") + XmlItem(3, "Gamma") + "</Menu>"));
+    folders.WriteBin(TestBin({ Item(1, 0, 0), Separator(), Item(2, 0, 0) }, kGuidA), 10, L"a.bin");
+    folders.WriteBin(TestBin({ Item(1, 0, 0), Separator(), Item(3, 0, 0) }, kGuidB), 20, L"b.bin");
+}
+
+static const std::vector<std::wstring> kAlphaGamma = { L"Alpha", L"Gamma" };
+
+void TestProfilePicksSchemeOverNewerOne() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    WriteSchemesAAndB(folders);
+    assert(Titles(IndexOf(frame.Hwnd()).commands) == kAlphaGamma);   // without a profile the newer one wins
+    folders.WriteProfile(ProfileXml({ kGuidA }));
+    assert(Titles(IndexOf(frame.Hwnd()).commands) == kAlphaBeta);
+    // The profile can change, and the scheme with it
+    folders.WriteProfile(ProfileXml({ kGuidB }), 1);
+    assert(Titles(IndexOf(frame.Hwnd()).commands) == kAlphaGamma);
+    std::cout << "[PASS] TestProfilePicksSchemeOverNewerOne\n";
+}
+
+void TestNamedProfilesAreNotTheActiveProfile() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    WriteSchemesAAndB(folders);
+    folders.WriteProfile(ProfileXml({ kGuidA }));
+    folders.WriteNamedProfile(ProfileXml({ kGuidB }));   // next to a ProfileSet.xml: not the one in use
+    assert(Titles(IndexOf(frame.Hwnd()).commands) == kAlphaBeta);
+    std::cout << "[PASS] TestNamedProfilesAreNotTheActiveProfile\n";
+}
+
+void TestMissingOrAmbiguousProfileFallsBack() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    WriteSchemesAAndB(folders);
+    folders.WriteNamedProfile(ProfileXml({ kGuidA }));   // only named profiles: none in use is known
+    assert(Titles(IndexOf(frame.Hwnd()).commands) == kAlphaGamma);
+    folders.WriteProfile(ProfileXml({ kGuidA }));
+    folders.WriteProfile(ProfileXml({ kGuidA }), 0, L"Recent two");   // two profiles: which one is in use?
+    assert(Titles(IndexOf(frame.Hwnd()).commands) == kAlphaGamma);
+    std::cout << "[PASS] TestMissingOrAmbiguousProfileFallsBack\n";
+}
+
+void TestProfileWithoutOneCommandSchemeFallsBack() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    WriteSchemesAAndB(folders);
+    folders.WriteProfile(ProfileXml({ kGuidA, kGuidB }));
+    assert(Titles(IndexOf(frame.Hwnd()).commands) == kAlphaGamma);
+    folders.WriteProfile(ProfileXml({}), 1);
+    assert(Titles(IndexOf(frame.Hwnd()).commands) == kAlphaGamma);
+    folders.WriteProfile("this is not a profile", 2);
+    assert(Titles(IndexOf(frame.Hwnd()).commands) == kAlphaGamma);
+    std::cout << "[PASS] TestProfileWithoutOneCommandSchemeFallsBack\n";
+}
+
+void TestProfileSchemeThatDoesNotFitFallsBack() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    WriteSchemesAAndB(folders);
+    // Scheme A is the one in use according to the profile, but its menu is not in the live menu bar
+    folders.WriteBin(BinOf({ Menu(L"M", L"&Elsewhere", TestEntries()) }, kGuidA), 10, L"a.bin");
+    folders.WriteProfile(ProfileXml({ kGuidA }));
+    assert(Titles(IndexOf(frame.Hwnd()).commands) == kAlphaGamma);
+    std::cout << "[PASS] TestProfileSchemeThatDoesNotFitFallsBack\n";
+}
+
+// --- States without commands ------------------------------------------------------------------
+
+void TestNoExportState() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    folders.WriteBin(TestBin({ Item(1, 0, 0), Separator(), Item(7682, 0, 0) }), 0);
+    const CommandIndex index = IndexOf(frame.Hwnd());
+    assert(index.state == CommandState::NoExport && index.commands.empty() && index.unnamed == 0);
+    // Work Environment is found from the scheme alone and runs like any command
+    assert(index.workEnvironment.kind == ItemKind::Command && index.workEnvironment.liveId == 300);
+    assert((index.workEnvironment.menuPosition == std::vector<int>{ 0, 2 }));
+    assert(CommandSource::Run(index.workEnvironment, frame.Hwnd()));
+    Pump();
+    assert((g_commands == std::vector<unsigned>{ 300 }));
+    // An export whose menu bar is not the live one gives no names either
+    folders.WriteExport(0, ExportForOtherMenuBar());
+    assert(IndexOf(frame.Hwnd()).state == CommandState::NoExport);
+    std::cout << "[PASS] TestNoExportState\n";
+}
+
+void TestWorkEnvironmentIsFoundWithAnExport() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    folders.WriteExport(0, ExportXml("<Menu ID=\"M\" title=\"&amp;Test\">" + XmlItem(1, "Alpha") + "<Separator/>" +
+                                      XmlItem(7682, "Work Environment") + "</Menu>"));
+    folders.WriteBin(TestBin({ Item(1, 0, 0), Separator(), Item(7682, 0, 0) }), 0);
+    const CommandIndex index = IndexOf(frame.Hwnd());
+    assert(index.state == CommandState::Ready && index.workEnvironment.liveId == 300);
+    assert(Titles(index.commands) == (std::vector<std::wstring>{ L"Alpha", L"Work Environment" }));
+    std::cout << "[PASS] TestWorkEnvironmentIsFoundWithAnExport\n";
+}
+
+void TestUnreadableBinState() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    folders.WriteExport(0);
+    folders.WriteBin(UnreadableBin(), 0);
+    CommandIndex index = IndexOf(frame.Hwnd());
+    assert(index.state == CommandState::Unreadable && index.commands.empty() && index.workEnvironment.liveId == 0);
+    std::cout << "[PASS] TestUnreadableBinState\n";
+}
+
+void TestNoSchemeFileIsUnreadable() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    folders.WriteExport(0);
+    folders.CreateArchicadFolder();
+    assert(IndexOf(frame.Hwnd()).state == CommandState::Unreadable);
+    assert(IndexOf(frame.Hwnd()).commands.empty());
+    std::cout << "[PASS] TestNoSchemeFileIsUnreadable\n";
+}
+
+void TestSchemeThatLinksNothingIsUnreadable() {
+    TestFrame frame(Fill::ExtraItem);   // the live menu has entries the scheme does not know
+    TestFolders folders;
+    folders.WriteCurrent();
+    const CommandIndex index = IndexOf(frame.Hwnd());
+    assert(index.commands.empty() && index.state == CommandState::Unreadable);
+    std::cout << "[PASS] TestSchemeThatLinksNothingIsUnreadable\n";
 }
 
 void TestBuildCommandIndexWithoutMenu() {
     TestFolders folders;
     folders.WriteCurrent();
-    assert(CommandSource::BuildCommandIndex(nullptr, {}).empty());
+    assert(IndexOf(nullptr).commands.empty());
     HWND noMenu = CreateWindowExW(0, L"STATIC", L"no menu", WS_OVERLAPPED, 0, 0, 50, 50, nullptr, nullptr,
                                   GetModuleHandleW(nullptr), nullptr);
     assert(noMenu != nullptr);
-    assert(CommandSource::BuildCommandIndex(noMenu, {}).empty());
+    assert(IndexOf(noMenu).commands.empty());
     DestroyWindow(noMenu);
     std::cout << "[PASS] TestBuildCommandIndexWithoutMenu\n";
 }
 
-void TestSeveralArchicadFolders() {
+// --- Reading the files --------------------------------------------------------------------------
+
+void TestOversizeExportIsNotUsed() {
     TestFrame frame(Fill::Normal);
     TestFolders folders;
-    folders.WriteExport(60);
-    folders.WriteScheme(std::string(kSchemeMarker), 0, L"Archicad 29 DEU R1");
-    folders.WriteScheme(std::string(kSchemeMarker), 120, L"Archicad 29 INT R1");
-    AssertSingleOutOfDateLine(CommandSource::BuildCommandIndex(frame.Hwnd(), {}));
-    std::cout << "[PASS] TestSeveralArchicadFolders\n";
+    folders.WriteBin(TestBin(), 0);
+    folders.WriteExport(60, std::string(kComponentType) + std::string(kMaxInputBytes, ' '));
+    assert(IndexOf(frame.Hwnd()).state == CommandState::NoExport);
+    folders.WriteExport(61);
+    assert(IndexOf(frame.Hwnd()).commands.size() == 2);
+    std::cout << "[PASS] TestOversizeExportIsNotUsed\n";
 }
 
-void TestOversizeExportIsNotOffered() {
+void TestOversizeBinIsUnreadable() {
     TestFrame frame(Fill::Normal);
     TestFolders folders;
-    folders.WriteScheme(std::string(kSchemeMarker), 0);
-    folders.WriteExport(60, std::string(kMaxInputBytes + 1, ' '));
-    AssertSingleOutOfDateLine(CommandSource::BuildCommandIndex(frame.Hwnd(), {}));
-    folders.WriteExport(61);
-    assert(CommandSource::BuildCommandIndex(frame.Hwnd(), {}).size() == 2);
-    std::cout << "[PASS] TestOversizeExportIsNotOffered\n";
+    folders.WriteExport(0);
+    folders.WriteBin(std::string(kComponentType) + std::string(kMaxInputBytes, ' '), 0);
+    assert(IndexOf(frame.Hwnd()).state == CommandState::Unreadable);
+    std::cout << "[PASS] TestOversizeBinIsUnreadable\n";
 }
 
 void TestUnreadableExportIsRetried() {
@@ -512,10 +763,23 @@ void TestUnreadableExportIsRetried() {
     folders.WriteCurrent();
     {
         FileLock lock(folders.Commands() / L"export.xml");
-        AssertSingleOutOfDateLine(CommandSource::BuildCommandIndex(frame.Hwnd(), {}));
+        assert(IndexOf(frame.Hwnd()).state == CommandState::NoExport);
     }
-    assert(CommandSource::BuildCommandIndex(frame.Hwnd(), {}).size() == 2);   // same file time, read again
+    assert(IndexOf(frame.Hwnd()).commands.size() == 2);   // same file time, read again
     std::cout << "[PASS] TestUnreadableExportIsRetried\n";
+}
+
+void TestLockedSchemeFileIsUnreadable() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    folders.WriteCurrent();
+    {
+        // Whether the locked file is the scheme in use cannot be told, so nothing is offered
+        FileLock lock(folders.SchemePath());
+        assert(IndexOf(frame.Hwnd()).state == CommandState::Unreadable);
+    }
+    assert(IndexOf(frame.Hwnd()).commands.size() == 2);
+    std::cout << "[PASS] TestLockedSchemeFileIsUnreadable\n";
 }
 
 void TestDirectoryNamedLikeAnExportIsSkipped() {
@@ -523,18 +787,9 @@ void TestDirectoryNamedLikeAnExportIsSkipped() {
     TestFolders folders;
     folders.WriteCurrent();
     std::filesystem::create_directories(folders.Commands() / L"folder.xml");
-    assert(CommandSource::BuildCommandIndex(frame.Hwnd(), {}).size() == 2);
+    std::filesystem::create_directories(folders.SchemePath().parent_path() / L"folder.bin");
+    assert(IndexOf(frame.Hwnd()).commands.size() == 2);
     std::cout << "[PASS] TestDirectoryNamedLikeAnExportIsSkipped\n";
-}
-
-void TestLockedSchemeFileIsUnknown() {
-    TestFrame frame(Fill::Normal);
-    TestFolders folders;
-    folders.WriteCurrent();
-    WriteTestFile(folders.SchemePath().parent_path() / L"other.bin", kSchemeMarker, 0);
-    FileLock lock(folders.SchemePath());
-    AssertCommandsWithCannotCheckNote(frame.Hwnd());
-    std::cout << "[PASS] TestLockedSchemeFileIsUnknown\n";
 }
 
 // Without a user profile the commands folder is unknown; a ".baaz\commands" below the current folder is not it
@@ -549,66 +804,39 @@ void TestNoUserProfileOffersNothing() {
     assert(SetCurrentDirectoryW(folders.Root().c_str()));
     assert(SetEnvironmentVariableW(L"USERPROFILE", nullptr));
     CommandSource::SetFoldersForTest(L"", folders.AppData().wstring());   // no test override: the real lookup
-    const std::vector<SearchItem> items = CommandSource::BuildCommandIndex(frame.Hwnd(), {});
+    const CommandIndex index = IndexOf(frame.Hwnd());
     SetCurrentDirectoryW(savedDirectory);
     if (savedLength > 0) SetEnvironmentVariableW(L"USERPROFILE", savedProfile);
-    assert(items.empty());
+    assert(index.commands.empty());
     std::cout << "[PASS] TestNoUserProfileOffersNothing\n";
 }
 
-void TestNoExportOffersNothing() {
+void TestExportIsReReadOnlyWhenItChanges() {
     TestFrame frame(Fill::Normal);
     TestFolders folders;
-    assert(CommandSource::BuildCommandIndex(frame.Hwnd(), {}).empty());
-    std::cout << "[PASS] TestNoExportOffersNothing\n";
-}
-
-void TestExportForOtherMenuBarIsOutOfDate() {
-    TestFrame frame(Fill::Normal);
-    TestFolders folders;
-    folders.WriteExport(60, ExportForOtherMenuBar());
-    folders.WriteScheme(std::string(kSchemeMarker), 0);
-    std::vector<SearchItem> items = CommandSource::BuildCommandIndex(frame.Hwnd(), {});
-    assert(items.size() == 1 && items[0].kind == ItemKind::Help && items[0].title == kOutOfDate);
-    std::cout << "[PASS] TestExportForOtherMenuBarIsOutOfDate\n";
-}
-
-void TestTwoEquallyFittingExportsOfferNothing() {
-    TestFrame frame(Fill::Normal);
-    TestFolders folders;
+    folders.WriteBin(TestBin(), 0);
     folders.WriteExport(60);
-    WriteTestFile(folders.Commands() / L"copy.xml", kExportXml, 60);
-    folders.WriteScheme(std::string(kSchemeMarker), 0);
-    std::vector<SearchItem> items = CommandSource::BuildCommandIndex(frame.Hwnd(), {});
-    assert(items.size() == 1 && items[0].kind == ItemKind::Help && items[0].title == kOutOfDate);
-    std::cout << "[PASS] TestTwoEquallyFittingExportsOfferNothing\n";
-}
-
-void TestUncheckableIsNotedOnce() {
-    TestFrame frame(Fill::Normal);
-    TestFolders folders;
-    folders.WriteExport(60);   // no Archicad folder under appdata, so staleness cannot be checked
-    std::vector<SearchItem> first = CommandSource::BuildCommandIndex(frame.Hwnd(), {});
-    assert(first.size() == 3);
-    assert(first[0].kind == ItemKind::Command && first[1].kind == ItemKind::Command);
-    assert(first[2].kind == ItemKind::Help);
-    assert(first[2].title == L"Command list: cannot check whether the export is current");
-    assert(CommandSource::BuildCommandIndex(frame.Hwnd(), {}).size() == 2);
-    std::cout << "[PASS] TestUncheckableIsNotedOnce\n";
-}
-
-void TestExportIsReReadOnlyWhenItsTimeChanges() {
-    TestFrame frame(Fill::Normal);
-    TestFolders folders;
-    folders.WriteExport(60);
-    folders.WriteScheme(std::string(kSchemeMarker), 0);
-    assert(CommandSource::BuildCommandIndex(frame.Hwnd(), {}).size() == 2);
-    folders.WriteExport(60, ExportForOtherMenuBar());   // same file time: the first parse is kept
-    assert(CommandSource::BuildCommandIndex(frame.Hwnd(), {}).size() == 2);
+    assert(IndexOf(frame.Hwnd()).commands.size() == 2);
+    folders.WriteExport(60, ExportForOtherMenuBar());   // same path, file time and size: the first parse is kept
+    assert(IndexOf(frame.Hwnd()).commands.size() == 2);
     folders.WriteExport(61, ExportForOtherMenuBar());   // new file time: read again, and it no longer fits
-    std::vector<SearchItem> items = CommandSource::BuildCommandIndex(frame.Hwnd(), {});
-    assert(items.size() == 1 && items[0].kind == ItemKind::Help);
-    std::cout << "[PASS] TestExportIsReReadOnlyWhenItsTimeChanges\n";
+    assert(IndexOf(frame.Hwnd()).state == CommandState::NoExport);
+    folders.WriteExport(61, kExportXml + " ");          // same file time, new size: read again
+    assert(IndexOf(frame.Hwnd()).commands.size() == 2);
+    std::cout << "[PASS] TestExportIsReReadOnlyWhenItChanges\n";
+}
+
+void TestBinIsReReadOnlyWhenItChanges() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    folders.WriteExport(0);
+    folders.WriteBin(TestBin(), 60);
+    assert(Titles(IndexOf(frame.Hwnd()).commands) == kAlphaBeta);
+    folders.WriteBin(TestBin({ Item(2, 0, 0), Separator(), Item(1, 0, 0) }), 60);   // same time, same size: kept
+    assert(Titles(IndexOf(frame.Hwnd()).commands) == kAlphaBeta);
+    folders.WriteBin(TestBin({ Item(2, 0, 0), Separator(), Item(1, 0, 0) }), 61);   // new time: read again
+    assert((Titles(IndexOf(frame.Hwnd()).commands) == std::vector<std::wstring>{ L"Beta", L"Alpha" }));
+    std::cout << "[PASS] TestBinIsReReadOnlyWhenItChanges\n";
 }
 
 int main() {
@@ -618,28 +846,42 @@ int main() {
     TestRunRefusesChangedId();
     TestRunRefusesWrongKindOrPosition();
     TestRunRefusesDisabledFrame();
-    TestRunAfterMenuRebuiltSinceIndexing();
     TestNestedPopups();
-    TestIndexOffersGreyedItemDisabled();
-    TestStatusLineWhenStale();
     TestOffersCommandsWhenCurrent();
     TestShiftedTopLevelPositionsAreFollowed();
-    TestSchemeFileWithoutMarkerIsUnknown();
-    TestArchicadFolderWithoutSchemeFilesIsUnknown();
-    TestExportChoice();
-    TestExtraEntryGivesStatusLine();
+    TestRunAfterMenuRebuiltSinceIndexing();
+    TestIndexOffersGreyedItemDisabled();
+    TestExportFoundBySchemeMarker();
+    TestNewestFittingExportGivesNames();
+    TestUnnamedCommandIsCountedNotOffered();
+    TestPlaceholderIsNeverCounted();
+    TestMovedCommandKeepsItsName();
+    TestMenuChangeWithoutExportStillOffers();
+    TestUnloadedAddOnItemsDoNotBlockLinking();
+    TestSchemeChosenByFitThenTime();
+    TestTiedSchemesWithSameTimeOfferNothing();
+    TestSchemesOfSeveralArchicadFoldersAreCandidates();
+    TestBinWithoutMarkerIsNotACandidate();
+    TestNewerUnreadableSchemeOffersNothing();
+    TestProfilePicksSchemeOverNewerOne();
+    TestNamedProfilesAreNotTheActiveProfile();
+    TestMissingOrAmbiguousProfileFallsBack();
+    TestProfileWithoutOneCommandSchemeFallsBack();
+    TestProfileSchemeThatDoesNotFitFallsBack();
+    TestNoExportState();
+    TestWorkEnvironmentIsFoundWithAnExport();
+    TestUnreadableBinState();
+    TestNoSchemeFileIsUnreadable();
+    TestSchemeThatLinksNothingIsUnreadable();
     TestBuildCommandIndexWithoutMenu();
-    TestSeveralArchicadFolders();
-    TestOversizeExportIsNotOffered();
+    TestOversizeExportIsNotUsed();
+    TestOversizeBinIsUnreadable();
     TestUnreadableExportIsRetried();
+    TestLockedSchemeFileIsUnreadable();
     TestDirectoryNamedLikeAnExportIsSkipped();
-    TestLockedSchemeFileIsUnknown();
     TestNoUserProfileOffersNothing();
-    TestNoExportOffersNothing();
-    TestExportForOtherMenuBarIsOutOfDate();
-    TestTwoEquallyFittingExportsOfferNothing();
-    TestUncheckableIsNotedOnce();
-    TestExportIsReReadOnlyWhenItsTimeChanges();
+    TestExportIsReReadOnlyWhenItChanges();
+    TestBinIsReReadOnlyWhenItChanges();
     std::cout << "All live menu tests passed.\n";
     return 0;
 }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "BinSchemeReader.hpp"
 #include "MenuLink.hpp"
 #include "SearchEngine.hpp"
 #include <windows.h>
@@ -26,28 +27,57 @@ private:
     std::set<std::vector<int>> m_filled;
 };
 
-// Archicad's menu commands, found by the names in the user's exported command scheme.
+// What Baaz can say about Archicad's menu commands right now
+enum class CommandState {
+    Ready,         // every linked command has a name
+    NoExport,      // the scheme links, but no export that fits gives names: no commands
+    NewCommands,   // some linked commands have no name in the export (added to the menus since)
+    Unreadable     // no scheme file that can be read and fits: no commands
+};
+
+struct CommandIndex {
+    std::vector<SearchItem> commands;   // named, linked commands only
+    CommandState state = CommandState::Unreadable;
+    size_t unnamed = 0;                 // NewCommands: linked, non-placeholder items without a name
+    SearchItem workEnvironment;         // kind Command, position of 7682; liveId 0 if not found
+};
+
+// Archicad's menu commands. The menu structure comes from the command scheme Archicad keeps current
+// (a .bin file), the names from the user's newest fitting export of the work environment.
 class CommandSource {
 public:
-    // Reads %USERPROFILE%\.baaz\commands\*.xml (re-read only when a file time changes), picks the
-    // export that fits the live menu bar best, checks that Archicad has not saved a newer scheme,
-    // and links. Without a usable export, or when nothing links, the result is a single Help line
-    // asking for a new export; without any export it is empty. When the check for a newer scheme is
-    // not possible the commands are offered together with one "cannot check" Help line per session.
-    static std::vector<SearchItem> BuildCommandIndex(HWND frame, const std::vector<DynamicList>& lists);
+    // Re-reads the scheme files, the profile that names the scheme in use and the exports only when
+    // their path, write time or size changed. Takes the exported names from the newest export whose
+    // top-level menus fit the live menu bar, and the structure from the scheme file with the best fit
+    // (the one the profile names, if it fits), or else the newest of the best-fitting files. Commands
+    // of add-ons that the export does not list are left out of the structure first.
+    static CommandIndex BuildCommandIndex(HWND frame, const std::vector<DynamicList>& lists);
     // Fills the item's menu path again and posts WM_COMMAND only if the live item is still an
     // enabled item with the same id.
     static bool Run(const SearchItem& item, HWND frame);
 
-    struct CachedExport {
+    // A file read from disk, kept until its path, write time or size changes
+    struct CachedFile {
         std::wstring path;
         FILETIME time = {};
         unsigned long long size = 0;
         bool readFailed = false;   // too large or unreadable: read again at the next refresh
+    };
+
+    struct CachedExport : CachedFile {
         std::vector<MenuNode> bar;
     };
 
-    // Where the exports, the scheme files Archicad saves and the running program are
+    struct CachedScheme : CachedFile {
+        bool readable = false;     // the reader accepted the file
+        BinScheme scheme;
+    };
+
+    struct CachedProfile : CachedFile {
+        std::string schemeGuid;    // command scheme the profile names; empty if it names none or several
+    };
+
+    // Where the exports, the scheme files Archicad keeps and the running program are
     struct Locations {
         std::wstring commands;
         std::wstring graphisoft;
@@ -64,9 +94,13 @@ public:
 private:
     static Locations CurrentLocations();
     static std::vector<CachedExport> LoadExports(const std::wstring& folder);
+    // false if the scheme files could not be listed completely; activeGuid is empty unless exactly
+    // one profile of the work environment in use names a command scheme
+    static bool LoadSchemes(const Locations& where, std::vector<CachedScheme>& schemes, std::string& activeGuid);
 
     static std::vector<CachedExport> s_exports;
-    static bool s_checkNoted;
+    static std::vector<CachedScheme> s_schemes;
+    static std::vector<CachedProfile> s_profiles;
 #ifndef ACAPI_VERSION
     static Locations s_testLocations;
 #endif

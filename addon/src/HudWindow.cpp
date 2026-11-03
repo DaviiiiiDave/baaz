@@ -405,8 +405,8 @@ LRESULT CALLBACK HudWindow::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM 
         std::vector<SearchItem> items = NavigatorIndexer::BuildProjectIndex();
         // An exception must not leave the window procedure; the project items are still offered
         try {
-            const std::vector<SearchItem> commands = CommandSource::BuildCommandIndex(MainWindow(), {});
-            items.insert(items.end(), commands.begin(), commands.end());
+            const CommandIndex commands = CommandSource::BuildCommandIndex(MainWindow(), {});
+            items.insert(items.end(), commands.commands.begin(), commands.commands.end());
         } catch (...) {
         }
         SearchEngine::SetProjectItems(std::move(items));

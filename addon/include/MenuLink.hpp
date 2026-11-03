@@ -1,7 +1,6 @@
 #pragma once
 
 #include "SchemeReader.hpp"
-#include <windows.h>
 #include <string>
 #include <vector>
 
@@ -23,11 +22,14 @@ public:
 };
 
 struct LinkedCommand {
-    std::wstring name;
+    std::wstring name;          // empty if the scheme gave the command no name
     std::wstring menuPath;      // menu titles joined with U+203A, e.g. View or Documentation > Graphic Override
     std::vector<int> position;  // full path including the item's own index
     unsigned liveId = 0;
     bool enabled = true;
+    unsigned commandNumber = 0;  // full command id of the scheme item; all zero for entries of a dynamic list
+    unsigned mdid1 = 0;
+    unsigned mdid2 = 0;
 };
 
 // Names for the entries Archicad puts in place of one placeholder item, in menu order
@@ -36,22 +38,28 @@ struct DynamicList {
     std::vector<std::wstring> names;
 };
 
-// Links the exported menu tree to the live menu by position. Top-level menus are paired by unique
+// Links the scheme's menu tree to the live menu by position. Top-level menus are paired by unique
 // title (the rest of either side is ignored); inside a menu the position decides. Whenever a
 // position is in doubt, nothing is linked there: a name must never run a different command.
 class MenuLink {
 public:
     // Assumes equal item counts mean the same items in the same order. A placeholder may expand to
     // any number of live entries, so anchoring around it cannot tell an expanded placeholder from
-    // an unexplained extra entry or a missing static item. This relies on a current export (the
-    // staleness check) and on callers re-checking the live entry before running it.
+    // an unexplained extra entry or a missing static item. This relies on a scheme that is as
+    // current as the live menu and on callers re-checking the live entry before running it.
     static std::vector<LinkedCommand> Link(const std::vector<MenuNode>& bar, MenuSource& live,
                                            const std::vector<DynamicList>& lists);
     // -1 if no top-level menu has a title in common with the live bar, or the common ones are in
     // another order; otherwise the number of linked commands
     static int FitScore(const std::vector<MenuNode>& bar, MenuSource& live);
-    // true when any scheme file is newer than the export
-    static bool IsExportStale(const FILETIME& exportTime, const std::vector<FILETIME>& schemeTimes);
 };
+
+// Removes every Item with a non-zero MDID whose (mdid1, mdid2) occurs in no Item of exportBar, then every
+// Popup that had an Item or Popup before and has none left. The scheme keeps the configured layout of
+// add-ons that are not loaded; the live menu and the export leave those commands out.
+void DropAbsentAddOnItems(std::vector<MenuNode>& bar, const std::vector<MenuNode>& exportBar);
+
+// Sets the name of every Item of bar whose full command id has an Item in exportBar; others stay as they are.
+void AttachNames(std::vector<MenuNode>& bar, const std::vector<MenuNode>& exportBar);
 
 } // namespace Baaz

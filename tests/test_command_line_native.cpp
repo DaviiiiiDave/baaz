@@ -1045,8 +1045,8 @@ void TestSameNameKeepsItsOwnPosition() {
 }
 
 // The real graphic override popup is [408, S, 1840..1849, S, 566, S, 407] and 566 must stay
-// unlinked, so the first live segment of the region is the list. This assumes a current export
-// lists every static segment; a stale export is caught by the staleness check.
+// unlinked, so the first live segment of the region is the list. This assumes the scheme lists
+// every static segment.
 void TestListRegionTakesFirstLiveSegment() {
     const std::vector<DynamicList> lists = { { kGraphicOverridePlaceholder, Wide({ L"X", L"Y", L"Z" }) } };
     auto commands = LinkOne(ListMenu(), { 1, S, 10, S, 11, 12, S, 2 }, lists);
@@ -1056,22 +1056,106 @@ void TestListRegionTakesFirstLiveSegment() {
     std::cout << "[PASS] TestListRegionTakesFirstLiveSegment\n";
 }
 
-static FILETIME FileTimeFrom(unsigned long long ticks) {
-    FILETIME time;
-    time.dwLowDateTime = static_cast<DWORD>(ticks & 0xFFFFFFFFull);
-    time.dwHighDateTime = static_cast<DWORD>(ticks >> 32);
-    return time;
+static MenuNode AddOnNode(const wchar_t* name, unsigned number, unsigned mdid1, unsigned mdid2) {
+    MenuNode node = ItemNode(name, number);
+    node.mdid1 = mdid1;
+    node.mdid2 = mdid2;
+    return node;
 }
 
-void TestStaleExport() {
-    // Across the 32-bit boundary of the low word
-    const unsigned long long ticks = 0x1FFFFFFFFull;
-    FILETIME exportTime = FileTimeFrom(ticks);
-    assert(MenuLink::IsExportStale(exportTime, { FileTimeFrom(ticks - 1), FileTimeFrom(ticks + 1) }));
-    assert(!MenuLink::IsExportStale(exportTime, { FileTimeFrom(ticks - 1) }));
-    assert(!MenuLink::IsExportStale(exportTime, {}));
-    assert(!MenuLink::IsExportStale(exportTime, { FileTimeFrom(ticks) }));
-    std::cout << "[PASS] TestStaleExport\n";
+static std::wstring DumpAll(const std::vector<MenuNode>& nodes) {
+    std::wstring text;
+    for (const MenuNode& node : nodes) text += (text.empty() ? L"" : L";") + Dump(node);
+    return text;
+}
+
+// The export holds one command of the pair 7:8 and nothing else
+static std::vector<MenuNode> ExportOfOneAddOn() {
+    return { PopupNode(L"M", { AddOnNode(L"Kept", 20, 7, 8) }) };
+}
+
+void TestAbsentAddOnItemsAreDropped() {
+    std::vector<MenuNode> bar = {
+        PopupNode(L"M", { ItemNode(L"a", 10), SeparatorNode(),
+                          PopupNode(L"Gone", { AddOnNode(L"b", 30, 1, 2), SeparatorNode(), AddOnNode(L"c", 31, 3, 4) }),
+                          AddOnNode(L"d", 20, 7, 8), ItemNode(L"e", 11) }),
+        PopupNode(L"Add-On menu", { PopupNode(L"Deep", { AddOnNode(L"f", 32, 1, 2) }) }),
+        PopupNode(L"Last", { ItemNode(L"g", 12) }),
+    };
+    DropAbsentAddOnItems(bar, ExportOfOneAddOn());
+    // Built-in a and e stay although the export does not list them; the popup that held only absent
+    // items is gone, so d moves up; the add-on menu is gone with its only submenu
+    assert(DumpAll(bar) == L"P:M[I:a#10,S,I:d#20,I:e#11];P:Last[I:g#12]");
+    std::cout << "[PASS] TestAbsentAddOnItemsAreDropped\n";
+}
+
+void TestMixedPopupKeepsPresentItems() {
+    std::vector<MenuNode> bar = { PopupNode(L"M", { PopupNode(L"Mixed", { AddOnNode(L"b", 30, 1, 2), AddOnNode(L"d", 20, 7, 8),
+                                                                         SeparatorNode(), AddOnNode(L"c", 31, 3, 4) }) }) };
+    DropAbsentAddOnItems(bar, ExportOfOneAddOn());
+    assert(DumpAll(bar) == L"P:M[P:Mixed[I:d#20,S]]");
+    // The pair decides, not the number: the same number with another pair is a different command
+    bar = { PopupNode(L"M", { AddOnNode(L"x", 20, 7, 9), AddOnNode(L"y", 99, 7, 8) }) };
+    DropAbsentAddOnItems(bar, ExportOfOneAddOn());
+    assert(DumpAll(bar) == L"P:M[I:y#99]");
+    std::cout << "[PASS] TestMixedPopupKeepsPresentItems\n";
+}
+
+void TestAlreadyEmptyPopupStays() {
+    std::vector<MenuNode> bar = { PopupNode(L"M", { PopupNode(L"Empty", {}), PopupNode(L"Separators", { SeparatorNode() }),
+                                                    PopupNode(L"Emptied", { AddOnNode(L"b", 30, 1, 2) }), ItemNode(L"a", 10) }),
+                                  PopupNode(L"EmptyMenu", {}) };
+    DropAbsentAddOnItems(bar, ExportOfOneAddOn());
+    assert(DumpAll(bar) == L"P:M[P:Empty[],P:Separators[S],I:a#10];P:EmptyMenu[]");
+    std::cout << "[PASS] TestAlreadyEmptyPopupStays\n";
+}
+
+void TestAttachNamesByFullId() {
+    std::vector<MenuNode> bar = { PopupNode(L"M", { AddOnNode(L"", 1027, 5, 6), AddOnNode(L"", 1027, 7, 8), ItemNode(L"", 1027),
+                                                    PopupNode(L"Sub", { ItemNode(L"", 2) }), ItemNode(L"", 3) }) };
+    std::vector<MenuNode> exportBar = {
+        PopupNode(L"Other", { AddOnNode(L"First add-on", 1027, 5, 6), ItemNode(L"Built-in", 1027) }),
+        PopupNode(L"Elsewhere", { PopupNode(L"Deeper", { AddOnNode(L"Second add-on", 1027, 7, 8), ItemNode(L"Two", 2) }) }),
+    };
+    AttachNames(bar, exportBar);
+    const std::vector<MenuNode>& items = bar[0].children;
+    assert(items[0].name == L"First add-on" && items[1].name == L"Second add-on" && items[2].name == L"Built-in");
+    assert(items[3].children[0].name == L"Two");
+    assert(items[4].name.empty());   // no name in the export: stays empty
+    assert(items[3].name == L"Sub" && bar[0].name == L"M");   // popups keep their own titles
+    std::cout << "[PASS] TestAttachNamesByFullId\n";
+}
+
+void TestLinkedCommandCarriesItsFullId() {
+    std::vector<MenuNode> bar = OneMenu({ AddOnNode(L"Add-on", 1027, 0x47246d64, 0x3bbe5ae9), ItemNode(L"", 12) });
+    FakeMenu live = OneLive({ 1, 2 });
+    auto commands = MenuLink::Link(bar, live, {});
+    assert(commands.size() == 2);
+    assert(commands[0].commandNumber == 1027 && commands[0].mdid1 == 0x47246d64u && commands[0].mdid2 == 0x3bbe5ae9u);
+    // An item without a name is linked with an empty name; the position stays right
+    assert(commands[1].name.empty() && commands[1].commandNumber == 12 && commands[1].liveId == 2);
+    assert((commands[1].position == std::vector<int>{ 0, 1 }));
+    std::cout << "[PASS] TestLinkedCommandCarriesItsFullId\n";
+}
+
+// Only these ids are replaced by Archicad at run time; the same number with another MDID is a normal command
+void TestPlaceholdersAreKeyedByFullId() {
+    const MenuNode notOffered[] = {
+        AddOnNode(L"no variant combinations", 1027, 0x47246d64, 0xbca36043), AddOnNode(L"repeat last command", 1027, 0, 0),
+        AddOnNode(L"reopen last output", 20754, 0, 0), AddOnNode(L"graphic override list", 23040, 0, 0),
+    };
+    for (const MenuNode& node : notOffered) {
+        assert(LinkOne({ ItemNode(L"A", 11), node, ItemNode(L"B", 12) }, { 1, 2, 3 }).size() == 2);
+    }
+    const MenuNode offered[] = {
+        AddOnNode(L"select connected horizontal guides", 1027, 0x47246d64, 0x3bbe5ae9), AddOnNode(L"Add-On Manager", 1293, 0, 0),
+        AddOnNode(L"same number, add-on MDID", 20754, 1, 2), AddOnNode(L"same number, add-on MDID", kAddOnPlaceholder, 1, 2),
+    };
+    for (const MenuNode& node : offered) {
+        auto commands = LinkOne({ ItemNode(L"A", 11), node, ItemNode(L"B", 12) }, { 1, 2, 3 });
+        assert(commands.size() == 3 && commands[1].liveId == 2 && commands[1].name == node.name);
+    }
+    std::cout << "[PASS] TestPlaceholdersAreKeyedByFullId\n";
 }
 
 int main() {
@@ -1127,7 +1211,12 @@ int main() {
     TestAnsichtExactLinkSet();
     TestSameNameKeepsItsOwnPosition();
     TestListRegionTakesFirstLiveSegment();
-    TestStaleExport();
+    TestAbsentAddOnItemsAreDropped();
+    TestMixedPopupKeepsPresentItems();
+    TestAlreadyEmptyPopupStays();
+    TestAttachNamesByFullId();
+    TestLinkedCommandCarriesItsFullId();
+    TestPlaceholdersAreKeyedByFullId();
     std::cout << "All command line tests passed\n";
     return 0;
 }

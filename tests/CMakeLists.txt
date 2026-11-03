@@ -44,6 +44,7 @@ add_test(NAME BinScheme COMMAND test_bin_scheme)
 # Win32 menu filling and running against a real test window, and loading of the exported command list
 add_executable(test_live_menu
     test_live_menu.cpp
+    ../addon/src/BinSchemeReader.cpp
     ../addon/src/CommandSource.cpp
     ../addon/src/MenuLink.cpp
     ../addon/src/SchemeReader.cpp

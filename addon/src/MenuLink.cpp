@@ -1,36 +1,54 @@
 #include "MenuLink.hpp"
 #include <algorithm>
+#include <array>
 #include <iterator>
+#include <map>
+#include <set>
 #include <utility>
 
 namespace Baaz {
 
-// Command numbers of the AC29 standard scheme whose item Archicad replaces at run time or whose
-// meaning depends on a modifier key. Found by the German names of the built-in items (MDID 0)
-// that start with "Keine ", "Kein ", "Letzte" or "Add-On" (which also covers "Add-On-"), and by
-// the items flagged dynamic="yes" in the scheme (exactly two: 514 and 2563). This includes graphic
-// override combinations (23040) and model view options (9472). The numbers do not depend on the
-// language. 1027, 1293 and 20754 are static commands that match by name only; they stay in the
-// table, so they are never offered, which is the safe side. Sorted for binary search.
-static constexpr unsigned kPlaceholderCommands[] = {
-    514, 522, 542, 550, 551, 778, 787, 794, 1027, 1293, 1549, 1551,
-    1802, 1803, 2055, 2563, 2578, 2817, 2825, 2826, 2832, 2833, 2834, 2835,
-    2836, 2841, 2848, 2851, 3331, 3332, 3333, 3356, 5901, 6409, 6658, 6660,
-    8196, 8449, 8450, 8706, 8962, 9218, 9472, 9986, 9987, 10008, 10018, 10019,
-    10020, 10027, 10028, 10034, 10497, 10754, 10755, 11010, 11011, 11266, 11267, 11522,
-    11523, 11778, 11779, 12034, 12035, 14341, 15105, 16129, 16641, 16642, 17923, 17924,
-    20754, 20994, 20995, 21250, 21251, 21506, 21507, 21768, 22018, 22019, 22530, 22785,
-    23040
+// Built-in commands (MDID 0) of the AC29 standard scheme whose item Archicad replaces at run time or
+// whose meaning depends on a modifier key. Found by the German names of the built-in items that
+// start with "Keine ", "Kein ", "Letzte" or "Add-On" (which also covers "Add-On-"), and by the items
+// flagged dynamic="yes" in the scheme (exactly two: 514 and 2563). This includes graphic override
+// combinations (23040) and model view options (9472). The numbers do not depend on the language.
+// 1027 (repeat last command) and 20754 (reopen last output) are in this list for their MDID-0 item
+// only. Add-On Manager (1293) matched "Add-On" by name only and is a static command, so it is not
+// listed. Sorted for binary search.
+static constexpr unsigned kBuiltInPlaceholders[] = {
+    514, 522, 542, 550, 551, 778, 787, 794, 1027, 1549, 1551, 1802,
+    1803, 2055, 2563, 2578, 2817, 2825, 2826, 2832, 2833, 2834, 2835, 2836,
+    2841, 2848, 2851, 3331, 3332, 3333, 3356, 5901, 6409, 6658, 6660, 8196,
+    8449, 8450, 8706, 8962, 9218, 9472, 9986, 9987, 10008, 10018, 10019, 10020,
+    10027, 10028, 10034, 10497, 10754, 10755, 11010, 11011, 11266, 11267, 11522, 11523,
+    11778, 11779, 12034, 12035, 14341, 15105, 16129, 16641, 16642, 17923, 17924, 20754,
+    20994, 20995, 21250, 21251, 21506, 21507, 21768, 22018, 22019, 22530, 22785, 23040
 };
 
-static_assert(std::is_sorted(std::begin(kPlaceholderCommands), std::end(kPlaceholderCommands)),
-              "kPlaceholderCommands is searched with binary_search");
+static_assert(std::is_sorted(std::begin(kBuiltInPlaceholders), std::end(kBuiltInPlaceholders)),
+              "kBuiltInPlaceholders is searched with binary_search");
+
+// A list that an add-on puts into the menu: the variant combinations of the add-on that also has the
+// static command 1027-0x47246d64-0x3bbe5ae9, which is offered like any other command.
+struct AddOnPlaceholder {
+    unsigned number;
+    unsigned mdid1;
+    unsigned mdid2;
+};
+
+static constexpr AddOnPlaceholder kAddOnPlaceholders[] = { { 1027, 0x47246d64, 0xbca36043 } };
 
 static const wchar_t* const kPathSeparator = L" \u203a ";
 
 static bool IsPlaceholder(const MenuNode& node) {
-    return node.type == MenuNodeType::Item &&
-           std::binary_search(std::begin(kPlaceholderCommands), std::end(kPlaceholderCommands), node.commandNumber);
+    if (node.type != MenuNodeType::Item) return false;
+    if (node.mdid1 == 0 && node.mdid2 == 0) {
+        return std::binary_search(std::begin(kBuiltInPlaceholders), std::end(kBuiltInPlaceholders), node.commandNumber);
+    }
+    return std::any_of(std::begin(kAddOnPlaceholders), std::end(kAddOnPlaceholders), [&node](const AddOnPlaceholder& placeholder) {
+        return placeholder.number == node.commandNumber && placeholder.mdid1 == node.mdid1 && placeholder.mdid2 == node.mdid2;
+    });
 }
 
 namespace {
@@ -144,8 +162,8 @@ private:
 
     void LinkRegion(size_t first, size_t last, size_t liveFirst, size_t liveCount) {
         // The first live segment is the list: the real graphic override popup holds a segment
-        // after it (566) that must stay unlinked. This relies on a current export listing every
-        // static segment; a stale one is caught by the staleness check.
+        // after it (566) that must stay unlinked. This relies on the scheme listing every
+        // static segment.
         if (first == last && IsLonePlaceholder(m_catalogueSegments[first])) {
             LinkList(m_catalogueSegments[first], m_liveSegments[liveFirst]);
             return;
@@ -234,7 +252,11 @@ private:
             if (node.type == MenuNodeType::Popup) {
                 MenuLevel(m_run, node.children, Position(pair.live), m_menuPath + kPathSeparator + node.name).Link();
             } else if (!IsPlaceholder(node)) {
-                m_run.commands.push_back(MakeCommand(node.name, pair.live));
+                LinkedCommand command = MakeCommand(node.name, pair.live);
+                command.commandNumber = node.commandNumber;
+                command.mdid1 = node.mdid1;
+                command.mdid2 = node.mdid2;
+                m_run.commands.push_back(std::move(command));
             }
         }
     }
@@ -313,11 +335,66 @@ int MenuLink::FitScore(const std::vector<MenuNode>& bar, MenuSource& live) {
     return static_cast<int>(linked.size());
 }
 
-bool MenuLink::IsExportStale(const FILETIME& exportTime, const std::vector<FILETIME>& schemeTimes) {
-    for (const FILETIME& schemeTime : schemeTimes) {
-        if (CompareFileTime(&schemeTime, &exportTime) > 0) return true;
+using MdidPair = std::pair<unsigned, unsigned>;
+
+static void CollectMdids(const std::vector<MenuNode>& nodes, std::set<MdidPair>& pairs) {
+    for (const MenuNode& node : nodes) {
+        if (node.type == MenuNodeType::Item) pairs.insert({ node.mdid1, node.mdid2 });
+        else CollectMdids(node.children, pairs);
     }
-    return false;
+}
+
+static bool IsAbsentAddOnItem(const MenuNode& node, const std::set<MdidPair>& present) {
+    return node.type == MenuNodeType::Item && (node.mdid1 != 0 || node.mdid2 != 0) &&
+           present.count({ node.mdid1, node.mdid2 }) == 0;
+}
+
+static bool HoldsItemOrPopup(const std::vector<MenuNode>& nodes) {
+    return std::any_of(nodes.begin(), nodes.end(), [](const MenuNode& node) { return node.type != MenuNodeType::Separator; });
+}
+
+static void DropAbsent(std::vector<MenuNode>& nodes, const std::set<MdidPair>& present) {
+    std::vector<MenuNode> kept;
+    for (MenuNode& node : nodes) {
+        const bool hadContent = node.type == MenuNodeType::Popup && HoldsItemOrPopup(node.children);
+        if (node.type == MenuNodeType::Popup) DropAbsent(node.children, present);
+        const bool emptied = hadContent && !HoldsItemOrPopup(node.children);
+        if (!emptied && !IsAbsentAddOnItem(node, present)) kept.push_back(std::move(node));
+    }
+    nodes = std::move(kept);
+}
+
+void DropAbsentAddOnItems(std::vector<MenuNode>& bar, const std::vector<MenuNode>& exportBar) {
+    std::set<MdidPair> present;
+    CollectMdids(exportBar, present);
+    DropAbsent(bar, present);
+}
+
+// number, mdid1, mdid2
+using CommandId = std::array<unsigned, 3>;
+
+static CommandId IdOf(const MenuNode& node) { return { node.commandNumber, node.mdid1, node.mdid2 }; }
+
+// The same command can sit in several menus; any of its names is a name of that command
+static void CollectNames(const std::vector<MenuNode>& nodes, std::map<CommandId, std::wstring>& names) {
+    for (const MenuNode& node : nodes) {
+        if (node.type == MenuNodeType::Item && !node.name.empty()) names.emplace(IdOf(node), node.name);
+        else CollectNames(node.children, names);
+    }
+}
+
+static void SetNames(std::vector<MenuNode>& nodes, const std::map<CommandId, std::wstring>& names) {
+    for (MenuNode& node : nodes) {
+        const auto found = node.type == MenuNodeType::Item ? names.find(IdOf(node)) : names.end();
+        if (found != names.end()) node.name = found->second;
+        SetNames(node.children, names);
+    }
+}
+
+void AttachNames(std::vector<MenuNode>& bar, const std::vector<MenuNode>& exportBar) {
+    std::map<CommandId, std::wstring> names;
+    CollectNames(exportBar, names);
+    SetNames(bar, names);
 }
 
 } // namespace Baaz
