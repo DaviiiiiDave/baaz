@@ -16,6 +16,8 @@ static const size_t kMaxXmlDepth = 64;
 // Menus can reference each other, so a few KB of XML can expand into billions of nodes.
 // A real scheme builds about 1300.
 static const size_t kMaxMenuNodes = 100000;
+// Linking copies menu paths, so long titles would multiply memory; real names are far shorter.
+static const size_t kMaxNameLength = 512;
 static const size_t kMaxInputBytes = 8 * 1024 * 1024;
 
 namespace {
@@ -287,6 +289,11 @@ static std::wstring CleanName(const std::wstring& raw) {
     return name;
 }
 
+static bool ReadName(const std::wstring& raw, std::wstring& name) {
+    name = CleanName(raw);
+    return name.size() <= kMaxNameLength;
+}
+
 // "0x" followed by at least one hexadecimal digit
 static bool IsHexLiteral(const std::wstring& part) {
     return part.size() > 2 && part.compare(0, 2, L"0x") == 0 &&
@@ -318,8 +325,7 @@ static bool BuildItem(const XmlElement& element, MenuNode& node) {
     const std::wstring* comment = Attribute(element, L"comment");
     if (command == nullptr || comment == nullptr) return false;
     node.type = MenuNodeType::Item;
-    node.name = CleanName(*comment);
-    return ParseCommandNumber(*command, node.commandNumber);
+    return ReadName(*comment, node.name) && ParseCommandNumber(*command, node.commandNumber);
 }
 
 static bool BuildPopup(const XmlElement& menu, BuildContext& context, int depth, MenuNode& node);
@@ -362,7 +368,7 @@ static bool BuildPopup(const XmlElement& menu, BuildContext& context, int depth,
     const std::wstring* title = definition == nullptr ? nullptr : Attribute(*definition, L"title");
     if (title == nullptr) return false;
     node.type = MenuNodeType::Popup;
-    node.name = CleanName(*title);
+    if (!ReadName(*title, node.name)) return false;
     for (const XmlElement& child : definition->children) {
         MenuNode entry;
         if (!BuildEntry(child, context, depth + 1, entry)) return false;
