@@ -7,6 +7,11 @@ namespace Baaz {
 
 // Larger exports are rejected
 constexpr size_t kMaxInputBytes = 8 * 1024 * 1024;
+// Menus can reference each other, so a few KB of XML can expand into billions of nodes.
+// A real scheme builds about 1300.
+constexpr size_t kMaxMenuNodes = 100000;
+// Linking copies menu paths, so long titles would multiply memory; real names are far shorter.
+constexpr size_t kMaxNameLength = 512;
 
 enum class MenuNodeType { Item, Separator, Popup };
 
@@ -14,6 +19,8 @@ struct MenuNode {
     MenuNodeType type = MenuNodeType::Item;
     std::wstring name;               // comment or title; access keys removed
     unsigned commandNumber = 0;      // first part of command="<n>-<mdid1>-<mdid2>"
+    unsigned mdid1 = 0;              // second part, Item only
+    unsigned mdid2 = 0;              // third part, Item only
     std::vector<MenuNode> children;  // Popup only
 };
 

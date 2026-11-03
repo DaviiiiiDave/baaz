@@ -278,7 +278,7 @@ void TestNodeBudgetStopsExpansion() {
     assert(SchemeReader::ReadFloorPlanMenuBar(
         Scheme(definitions + BarWithGuid(kFloorPlanGuid, "<Menu IDREF=\"M0\"/>"))).empty());
 
-    // kMaxMenuNodes is 100000 in SchemeReader.cpp and counts the menu itself
+    // kMaxMenuNodes is 100000 in SchemeReader.hpp and counts the menu itself
     assert(SchemeReader::ReadFloorPlanMenuBar(MenuWithSeparators(99999)).size() == 1);
     assert(SchemeReader::ReadFloorPlanMenuBar(MenuWithSeparators(100000)).empty());
     std::cout << "[PASS] TestNodeBudgetStopsExpansion\n";
@@ -291,6 +291,27 @@ void TestInputSizeLimit() {
     assert(SchemeReader::ReadFloorPlanMenuBar(document + std::string(limit - document.size(), ' ')).size() == 1);
     assert(SchemeReader::ReadFloorPlanMenuBar(document + std::string(limit - document.size() + 1, ' ')).empty());
     std::cout << "[PASS] TestInputSizeLimit\n";
+}
+
+void TestSchemeReaderKeepsMdidParts() {
+    auto menus = SchemeReader::ReadFloorPlanMenuBar(FloorPlanBar(
+        "<Menu ID=\"M\" title=\"M\">"
+        "<Item command=\"2129920001-0x47732f64-0x38c147a6\" comment=\"a\"/>"
+        "<Item command=\"5-0x0-0xFFFFFFFF\" comment=\"b\"/>"
+        "<Item command=\"6-0x00000000001-0x2\" comment=\"c\"/>"
+        "</Menu>"));
+    assert(menus.size() == 1 && menus[0].children.size() == 3);
+    const MenuNode& first = menus[0].children[0];
+    assert(first.commandNumber == 2129920001u && first.mdid1 == 0x47732f64u && first.mdid2 == 0x38c147a6u);
+    assert(menus[0].children[1].mdid1 == 0u && menus[0].children[1].mdid2 == 0xFFFFFFFFu);
+    assert(menus[0].children[2].mdid1 == 1u && menus[0].children[2].mdid2 == 2u);
+    // A part that does not fit 32 bits makes the whole scheme unreadable
+    const char* const tooBig[] = { "1-0x100000000-0x0", "1-0x0-0x100000000", "1-0x0-0x1ffffffff" };
+    for (const char* command : tooBig) {
+        std::string item = std::string("<Menu ID=\"M\" title=\"M\"><Item command=\"") + command + "\" comment=\"a\"/></Menu>";
+        assert(SchemeReader::ReadFloorPlanMenuBar(FloorPlanBar(item)).empty());
+    }
+    std::cout << "[PASS] TestSchemeReaderKeepsMdidParts\n";
 }
 
 void TestExactTreeShape() {
@@ -1066,6 +1087,7 @@ int main() {
     TestDepthLimitNotCycle();
     TestNodeBudgetStopsExpansion();
     TestInputSizeLimit();
+    TestSchemeReaderKeepsMdidParts();
     TestExactTreeShape();
     TestPicksBarByGuidNotOrder();
     TestDuplicateBarGuidIsEmpty();

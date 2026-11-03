@@ -13,11 +13,6 @@ static const wchar_t* const kFloorPlanBarGuid = L"2085E4D3-5694-4BB9-ACAC-3AED5B
 // Real schemes nest menus about six deep; the limit stops reference cycles and hostile files.
 static const int kMaxMenuDepth = 16;
 static const size_t kMaxXmlDepth = 64;
-// Menus can reference each other, so a few KB of XML can expand into billions of nodes.
-// A real scheme builds about 1300.
-static const size_t kMaxMenuNodes = 100000;
-// Linking copies menu paths, so long titles would multiply memory; real names are far shorter.
-static const size_t kMaxNameLength = 512;
 
 namespace {
 
@@ -309,13 +304,26 @@ static bool ParseDecimal(const std::wstring& digits, unsigned& number) {
     return true;
 }
 
-// command="<n>-<mdid1>-<mdid2>" with decimal n and two hexadecimal MDID parts; returns n
-static bool ParseCommandNumber(const std::wstring& command, unsigned& number) {
+// "0x" followed by at least one hexadecimal digit that fits 32 bits
+static bool ParseHex32(const std::wstring& literal, unsigned& value) {
+    if (!IsHexLiteral(literal)) return false;
+    unsigned long long result = 0;
+    for (size_t i = 2; i < literal.size(); ++i) {
+        result = result * 16 + static_cast<unsigned long long>(DigitValue(literal[i], true));
+        if (result > UINT_MAX) return false;
+    }
+    value = static_cast<unsigned>(result);
+    return true;
+}
+
+// command="<n>-<mdid1>-<mdid2>" with decimal n and two hexadecimal MDID parts
+static bool ParseCommand(const std::wstring& command, MenuNode& node) {
     size_t first = command.find(L'-');
     size_t second = first == std::wstring::npos ? first : command.find(L'-', first + 1);
     if (second == std::wstring::npos || command.find(L'-', second + 1) != std::wstring::npos) return false;
-    return IsHexLiteral(command.substr(first + 1, second - first - 1)) && IsHexLiteral(command.substr(second + 1)) &&
-           ParseDecimal(command.substr(0, first), number);
+    return ParseHex32(command.substr(first + 1, second - first - 1), node.mdid1) &&
+           ParseHex32(command.substr(second + 1), node.mdid2) &&
+           ParseDecimal(command.substr(0, first), node.commandNumber);
 }
 
 static bool BuildItem(const XmlElement& element, MenuNode& node) {
@@ -323,7 +331,7 @@ static bool BuildItem(const XmlElement& element, MenuNode& node) {
     const std::wstring* comment = Attribute(element, L"comment");
     if (command == nullptr || comment == nullptr) return false;
     node.type = MenuNodeType::Item;
-    return ReadName(*comment, node.name) && ParseCommandNumber(*command, node.commandNumber);
+    return ReadName(*comment, node.name) && ParseCommand(*command, node);
 }
 
 static bool BuildPopup(const XmlElement& menu, BuildContext& context, int depth, MenuNode& node);

@@ -31,6 +31,16 @@ target_compile_definitions(test_command_line_native PRIVATE UNICODE _UNICODE
     BAAZ_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 add_test(NAME CommandLineNative COMMAND test_command_line_native)
 
+# Binary command scheme reader, built on synthetic bytes; real files only through BAAZ_TEST_SCHEME_BIN/XML
+add_executable(test_bin_scheme
+    test_bin_scheme.cpp
+    ../addon/src/BinSchemeReader.cpp
+    ../addon/src/SchemeReader.cpp
+)
+target_include_directories(test_bin_scheme PRIVATE ../addon/include)
+target_compile_definitions(test_bin_scheme PRIVATE UNICODE _UNICODE)
+add_test(NAME BinScheme COMMAND test_bin_scheme)
+
 # Win32 menu filling and running against a real test window, and loading of the exported command list
 add_executable(test_live_menu
     test_live_menu.cpp
