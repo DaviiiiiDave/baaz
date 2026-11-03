@@ -117,7 +117,14 @@ format is undocumented, so Baaz reads only the XML export.
 
 Baaz walks the exported floor-plan menu bar and the live Win32 menu bar side by side:
 
-- top-level menus are matched by title (access keys removed);
+- top-level menus are matched by title (access keys removed). A title is matched only if it
+  occurs exactly once among the exported top-level menus and exactly once in the live bar, and
+  empty titles never match. Everything unmatched on either side (menus of add-ons that are not
+  loaded, *Teamwork*, empty slots) is ignored, so nothing from it is linked. The matched menus
+  must appear in the same order on both sides, and at least one must match; otherwise the
+  export does not fit. The live index of a matched menu goes into the position, not the
+  exported one (measured in Archicad 29: the live bar had 22 slots, the export 20 menus, and
+  the positions were shifted);
 - inside a menu, popups and separators must line up; items between two separators form a
   segment;
 - a segment whose live item count equals the exported count is matched item by item;
@@ -192,7 +199,7 @@ There is no API to read the active scheme with names, so the user exports it onc
 - The user copies the command scheme XML into `%USERPROFILE%\.baaz\commands\`. *(My call: a
   fixed folder inside Baaz's own folder, so no path setting is needed.)*
 - If several `.xml` files are there, Baaz checks each one's "Nicht-Text" bar against the live
-  menu bar (top-level titles, popup and separator positions) and uses the one that fits. If none
+  menu bar (top-level titles matched as in 4.2, popup and separator positions) and uses the one that fits. If none
   fits, or more than one fits equally, no commands are offered. *(My call: matching beats "newest
   file", because the newest file is not necessarily the scheme in use.)*
 
@@ -271,6 +278,8 @@ Collected in the same session; each needs its own decision:
 - **D3. Disabled items are shown greyed out** and cannot be run.
 - **D4. The 43 built-in tools rank above menu commands** with similar names (the tool *Wand*
   before a command containing "Wand").
+- **D5. (Dave, 2026-11-03) Top-level menus are matched by unique title; unmatched menus on either
+  side are ignored; order must agree.**
 
 ## 11. Risks and unknowns, left to the build steps
 

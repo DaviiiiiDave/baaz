@@ -36,8 +36,9 @@ struct DynamicList {
     std::vector<std::wstring> names;
 };
 
-// Links the exported menu tree to the live menu by position. Whenever a position is in doubt,
-// nothing is linked there: a name must never run a different command.
+// Links the exported menu tree to the live menu by position. Top-level menus are paired by unique
+// title (the rest of either side is ignored); inside a menu the position decides. Whenever a
+// position is in doubt, nothing is linked there: a name must never run a different command.
 class MenuLink {
 public:
     // Assumes equal item counts mean the same items in the same order. A placeholder may expand to
@@ -46,7 +47,8 @@ public:
     // staleness check) and on callers re-checking the live entry before running it.
     static std::vector<LinkedCommand> Link(const std::vector<MenuNode>& bar, MenuSource& live,
                                            const std::vector<DynamicList>& lists);
-    // -1 if top-level titles differ; otherwise the number of linked commands
+    // -1 if no top-level menu has a title in common with the live bar, or the common ones are in
+    // another order; otherwise the number of linked commands
     static int FitScore(const std::vector<MenuNode>& bar, MenuSource& live);
     // true when any scheme file is newer than the export
     static bool IsExportStale(const FILETIME& exportTime, const std::vector<FILETIME>& schemeTimes);

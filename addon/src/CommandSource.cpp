@@ -118,7 +118,8 @@ CommandSource::Locations CommandSource::CurrentLocations() {
 #endif
     Locations locations;
     locations.modulePath = RunningModulePath();
-    locations.commands = (fs::path(Settings::FolderPath()) / L"commands").wstring();
+    // Settings falls back to the current folder; commands are not read from there
+    if (!EnvironmentValue(L"USERPROFILE").empty()) locations.commands = (fs::path(Settings::FolderPath()) / L"commands").wstring();
     const std::wstring appData = EnvironmentValue(L"APPDATA");
     if (!appData.empty()) locations.graphisoft = (fs::path(appData) / L"GRAPHISOFT").wstring();
     return locations;

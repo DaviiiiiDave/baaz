@@ -251,21 +251,48 @@ private:
 
 } // namespace
 
-static bool TitlesMatch(const std::vector<MenuNode>& bar, const std::vector<std::wstring>& titles) {
-    if (bar.empty() || bar.size() != titles.size()) return false;
-    for (size_t i = 0; i < bar.size(); ++i) {
-        if (bar[i].type != MenuNodeType::Popup || bar[i].name != titles[i]) return false;
-    }
-    return true;
+namespace {
+
+// A top-level menu of the catalogue and the live menu bar slot with the same title
+struct MatchedMenu {
+    size_t catalogue = 0;
+    size_t live = 0;
+};
+
+} // namespace
+
+static bool IsUniqueIn(const std::vector<std::wstring>& titles, const std::wstring& title) {
+    return std::count(titles.begin(), titles.end(), title) == 1;
 }
 
-// false if the live menu bar is not the one the catalogue describes
+// Pairs the top-level menus that have a title in common, in catalogue order. A title counts only if it
+// occurs once on each side and is not empty. Menus without a partner (add-on menus, Teamwork, empty
+// slots) are left out, because the live bar changes with the loaded add-ons and the project. false if
+// there is no pair, or if the pairs are not in the same order on both sides.
+static bool MatchMenus(const std::vector<MenuNode>& bar, const std::vector<std::wstring>& liveTitles,
+                       std::vector<MatchedMenu>& matched) {
+    std::vector<std::wstring> titles;
+    for (const MenuNode& menu : bar) {
+        if (menu.type != MenuNodeType::Popup) return false;
+        titles.push_back(menu.name);
+    }
+    for (size_t i = 0; i < titles.size(); ++i) {
+        if (titles[i].empty() || !IsUniqueIn(titles, titles[i]) || !IsUniqueIn(liveTitles, titles[i])) continue;
+        const size_t live = static_cast<size_t>(std::find(liveTitles.begin(), liveTitles.end(), titles[i]) - liveTitles.begin());
+        if (!matched.empty() && live <= matched.back().live) return false;
+        matched.push_back({ i, live });
+    }
+    return !matched.empty();
+}
+
+// false if the live menu bar has no menu in common with the catalogue, or in another order
 static bool LinkBar(const std::vector<MenuNode>& bar, MenuSource& live, const std::vector<DynamicList>& lists,
                     std::vector<LinkedCommand>& linked) {
-    if (!TitlesMatch(bar, live.TopLevelTitles())) return false;
+    std::vector<MatchedMenu> matched;
+    if (!MatchMenus(bar, live.TopLevelTitles(), matched)) return false;
     LinkRun run{ live, lists, {} };
-    for (size_t i = 0; i < bar.size(); ++i) {
-        MenuLevel(run, bar[i].children, { static_cast<int>(i) }, bar[i].name).Link();
+    for (const MatchedMenu& menu : matched) {
+        MenuLevel(run, bar[menu.catalogue].children, { static_cast<int>(menu.live) }, bar[menu.catalogue].name).Link();
     }
     std::sort(run.commands.begin(), run.commands.end(),
               [](const LinkedCommand& a, const LinkedCommand& b) { return a.position < b.position; });

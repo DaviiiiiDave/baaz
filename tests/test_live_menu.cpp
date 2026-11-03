@@ -65,7 +65,8 @@ static LRESULT CALLBACK FrameProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
 
 class TestFrame {
 public:
-    explicit TestFrame(Fill fill) {
+    // withOtherMenus: a menu "Extra" in front of "Test" and an untitled slot after it, as in a real bar
+    explicit TestFrame(Fill fill, bool withOtherMenus = false) {
         g_fill = fill;
         g_sub = nullptr;
         g_commands.clear();
@@ -77,7 +78,13 @@ public:
         RegisterClassW(&windowClass);
         HMENU bar = CreateMenu();
         g_popup = CreatePopupMenu();
+        if (withOtherMenus) {
+            HMENU extra = CreatePopupMenu();
+            AppendMenuW(extra, MF_STRING, 700, L"Other");
+            AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(extra), L"&Extra");
+        }
         AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(g_popup), L"&Test");
+        if (withOtherMenus) AppendMenuW(bar, MF_STRING, 701, L"");
         m_hwnd = CreateWindowExW(0, kClass, L"frame", WS_OVERLAPPEDWINDOW, 0, 0, 200, 100, nullptr, bar,
                                  windowClass.hInstance, nullptr);
         assert(m_hwnd != nullptr);
@@ -160,6 +167,7 @@ public:
     TestFolders(const TestFolders&) = delete;
     TestFolders& operator=(const TestFolders&) = delete;
 
+    std::filesystem::path Root() const { return m_root; }
     std::filesystem::path Commands() const { return m_root / L"commands"; }
     std::filesystem::path AppData() const { return m_root / L"appdata"; }
     void WriteExport(int secondsFromBase, const std::string& xml = kExportXml) const {
@@ -290,6 +298,24 @@ static void AssertCommandsWithCannotCheckNote(HWND frame) {
     assert(items.size() == 3);
     assert(items[0].kind == ItemKind::Command && items[1].kind == ItemKind::Command);
     assert(items[2].kind == ItemKind::Help && items[2].title == L"Command list: cannot check whether the export is current");
+}
+
+void TestShiftedTopLevelPositionsAreFollowed() {
+    TestFrame frame(Fill::Normal, true);   // live bar: Extra, Test, untitled slot; the export has Test only
+    TestFolders folders;
+    folders.WriteCurrent();
+    std::vector<SearchItem> items = CommandSource::BuildCommandIndex(frame.Hwnd(), {});
+    assert(items.size() == 2);
+    assert(items[0].title == L"Alpha" && items[0].liveId == 255 && (items[0].menuPosition == std::vector<int>{ 1, 0 }));
+    assert(items[1].title == L"Beta" && (items[1].menuPosition == std::vector<int>{ 1, 2 }));
+    assert(CommandSource::Run(items[0], frame.Hwnd()));
+    Pump();
+    assert((g_commands == std::vector<unsigned>{ 255 }));
+    frame.ChangeFill(Fill::ChangedId);
+    assert(!CommandSource::Run(items[0], frame.Hwnd()));
+    Pump();
+    assert(g_commands.size() == 1);
+    std::cout << "[PASS] TestShiftedTopLevelPositionsAreFollowed\n";
 }
 
 void TestSchemeFileWithoutMarkerIsUnknown() {
@@ -511,6 +537,25 @@ void TestLockedSchemeFileIsUnknown() {
     std::cout << "[PASS] TestLockedSchemeFileIsUnknown\n";
 }
 
+// Without a user profile the commands folder is unknown; a ".baaz\commands" below the current folder is not it
+void TestNoUserProfileOffersNothing() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    WriteTestFile(folders.Root() / L".baaz" / L"commands" / L"export.xml", kExportXml, 60);
+    wchar_t savedProfile[2048] = {};
+    const DWORD savedLength = GetEnvironmentVariableW(L"USERPROFILE", savedProfile, 2048);
+    wchar_t savedDirectory[2048] = {};
+    assert(GetCurrentDirectoryW(2048, savedDirectory) > 0);
+    assert(SetCurrentDirectoryW(folders.Root().c_str()));
+    assert(SetEnvironmentVariableW(L"USERPROFILE", nullptr));
+    CommandSource::SetFoldersForTest(L"", folders.AppData().wstring());   // no test override: the real lookup
+    const std::vector<SearchItem> items = CommandSource::BuildCommandIndex(frame.Hwnd(), {});
+    SetCurrentDirectoryW(savedDirectory);
+    if (savedLength > 0) SetEnvironmentVariableW(L"USERPROFILE", savedProfile);
+    assert(items.empty());
+    std::cout << "[PASS] TestNoUserProfileOffersNothing\n";
+}
+
 void TestNoExportOffersNothing() {
     TestFrame frame(Fill::Normal);
     TestFolders folders;
@@ -578,6 +623,7 @@ int main() {
     TestIndexOffersGreyedItemDisabled();
     TestStatusLineWhenStale();
     TestOffersCommandsWhenCurrent();
+    TestShiftedTopLevelPositionsAreFollowed();
     TestSchemeFileWithoutMarkerIsUnknown();
     TestArchicadFolderWithoutSchemeFilesIsUnknown();
     TestExportChoice();
@@ -588,6 +634,7 @@ int main() {
     TestUnreadableExportIsRetried();
     TestDirectoryNamedLikeAnExportIsSkipped();
     TestLockedSchemeFileIsUnknown();
+    TestNoUserProfileOffersNothing();
     TestNoExportOffersNothing();
     TestExportForOtherMenuBarIsOutOfDate();
     TestTwoEquallyFittingExportsOfferNothing();

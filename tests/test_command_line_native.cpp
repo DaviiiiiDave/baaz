@@ -285,7 +285,7 @@ void TestNodeBudgetStopsExpansion() {
 }
 
 void TestInputSizeLimit() {
-    // kMaxInputBytes is 8 MiB in SchemeReader.cpp; trailing white space is ignored by the reader
+    // kMaxInputBytes is 8 MiB in SchemeReader.hpp; trailing white space is ignored by the reader
     std::string document = FloorPlanBar("<Menu ID=\"M\" title=\"M\"/>");
     const size_t limit = 8u * 1024u * 1024u;
     assert(SchemeReader::ReadFloorPlanMenuBar(document + std::string(limit - document.size(), ' ')).size() == 1);
@@ -748,24 +748,111 @@ void TestFitScoreCountsLinks() {
     std::cout << "[PASS] TestFitScoreCountsLinks\n";
 }
 
-void TestTopLevelTitlesMustMatchExactly() {
+void TestTopLevelFitRules() {
     auto bar = AnsichtBar();
     FakeMenu none({});
     assert(MenuLink::FitScore(bar, none) == -1 && MenuLink::Link(bar, none, {}).empty());
 
+    // Top-level menus are matched by title, so a missing or an extra live menu no longer rejects the
+    // bar: the menus that are in both are linked, the others are ignored (they were -1 before)
     FakeMenu fewer({ L"Ablage" });
     fewer.Set({ 0 }, { 77 });
-    assert(MenuLink::FitScore(bar, fewer) == -1 && MenuLink::Link(bar, fewer, {}).empty());
+    assert(MenuLink::FitScore(bar, fewer) == 1);
+    assert((LinkedNames(MenuLink::Link(bar, fewer, {})) == std::vector<std::wstring>{ L"Neu" }));
 
     FakeMenu more({ L"Ablage", L"Ansicht", L"Extras" });
     more.Set({ 0 }, { 77 });
     more.Set({ kAnsichtIndex }, kMeasuredAnsicht);
-    assert(MenuLink::FitScore(bar, more) == -1 && MenuLink::Link(bar, more, {}).empty());
+    more.Set({ 2 }, { 88 });
+    auto withExtra = MenuLink::Link(bar, more, {});
+    assert(MenuLink::FitScore(bar, more) == static_cast<int>(withExtra.size()));
+    assert(FindCommand(withExtra, L"Neu") != nullptr && FindCommand(withExtra, L"Lineal") != nullptr);
+    assert(!HasLiveId(withExtra, 88));
 
+    // The matched menus must keep their order
     FakeMenu reordered({ L"Ansicht", L"Ablage" });
     reordered.Set({ 0 }, kMeasuredAnsicht);
     assert(MenuLink::FitScore(bar, reordered) == -1 && MenuLink::Link(bar, reordered, {}).empty());
-    std::cout << "[PASS] TestTopLevelTitlesMustMatchExactly\n";
+    std::cout << "[PASS] TestTopLevelFitRules\n";
+}
+
+static MenuNode OneItemMenu(const wchar_t* title, const wchar_t* item, unsigned number) {
+    return PopupNode(title, { ItemNode(item, number) });
+}
+
+// The pattern of a real Archicad bar, reduced: menus the export has and the live bar lacks (Apple,
+// ArchiCARD), menus only the live bar has (Teamwork), empty slots, and shifted positions
+void TestTopLevelMenusMatchedByTitle() {
+    std::vector<MenuNode> bar = { OneItemMenu(L"Apple", L"Apple item", 101), OneItemMenu(L"A", L"A item", 102),
+                                  OneItemMenu(L"B", L"B item", 103), OneItemMenu(L"ArchiCARD", L"Card item", 104),
+                                  OneItemMenu(L"Tapir", L"Tapir item", 105) };
+    FakeMenu live({ L"", L"A", L"B", L"Teamwork", L"Tapir", L"", L"" });
+    live.Set({ 0 }, { 90 });
+    live.Set({ 1 }, { 5 });
+    live.Set({ 2 }, { 6 });
+    live.Set({ 3 }, { 91 });
+    live.Set({ 4 }, { 7 });
+    auto commands = MenuLink::Link(bar, live, {});
+    assert((LinkedNames(commands) == std::vector<std::wstring>{ L"A item", L"B item", L"Tapir item" }));
+    assert((LinkedIds(commands) == std::vector<unsigned>{ 5, 6, 7 }));
+    assert((commands[0].position == std::vector<int>{ 1, 0 }));
+    assert((commands[1].position == std::vector<int>{ 2, 0 }));
+    assert((commands[2].position == std::vector<int>{ 4, 0 }));
+    assert(commands[0].menuPath == L"A" && commands[2].menuPath == L"Tapir");
+    assert(MenuLink::FitScore(bar, live) == 3);
+    std::cout << "[PASS] TestTopLevelMenusMatchedByTitle\n";
+}
+
+void TestDuplicateTopLevelTitlesAreNotMatched() {
+    std::vector<MenuNode> bar = { OneItemMenu(L"A", L"A item", 102), OneItemMenu(L"B", L"B item", 103) };
+    FakeMenu duplicateLive({ L"A", L"A", L"B" });
+    duplicateLive.Set({ 0 }, { 5 });
+    duplicateLive.Set({ 1 }, { 6 });
+    duplicateLive.Set({ 2 }, { 7 });
+    assert((LinkedNames(MenuLink::Link(bar, duplicateLive, {})) == std::vector<std::wstring>{ L"B item" }));
+
+    std::vector<MenuNode> duplicateBar = { OneItemMenu(L"A", L"A item", 102), OneItemMenu(L"A", L"Other A item", 106),
+                                           OneItemMenu(L"B", L"B item", 103) };
+    FakeMenu live({ L"A", L"B" });
+    live.Set({ 0 }, { 5 });
+    live.Set({ 1 }, { 7 });
+    assert((LinkedNames(MenuLink::Link(duplicateBar, live, {})) == std::vector<std::wstring>{ L"B item" }));
+
+    // If only duplicated titles are left, nothing matches
+    FakeMenu onlyDuplicates({ L"A", L"A" });
+    assert(MenuLink::FitScore(std::vector<MenuNode>{ OneItemMenu(L"A", L"A item", 102) }, onlyDuplicates) == -1);
+    std::cout << "[PASS] TestDuplicateTopLevelTitlesAreNotMatched\n";
+}
+
+void TestTopLevelOrderMustAgree() {
+    std::vector<MenuNode> bar = { OneItemMenu(L"A", L"A item", 102), OneItemMenu(L"B", L"B item", 103) };
+    FakeMenu swapped({ L"B", L"A" });
+    swapped.Set({ 0 }, { 6 });
+    swapped.Set({ 1 }, { 5 });
+    assert(MenuLink::FitScore(bar, swapped) == -1 && MenuLink::Link(bar, swapped, {}).empty());
+    std::cout << "[PASS] TestTopLevelOrderMustAgree\n";
+}
+
+void TestNoCommonTopLevelTitleDoesNotFit() {
+    std::vector<MenuNode> bar = { OneItemMenu(L"A", L"A item", 102) };
+    FakeMenu other({ L"X", L"Y" });
+    other.Set({ 0 }, { 5 });
+    other.Set({ 1 }, { 6 });
+    assert(MenuLink::FitScore(bar, other) == -1 && MenuLink::Link(bar, other, {}).empty());
+    std::cout << "[PASS] TestNoCommonTopLevelTitleDoesNotFit\n";
+}
+
+void TestEmptyTopLevelTitlesNeverMatch() {
+    std::vector<MenuNode> bar = { OneItemMenu(L"", L"Nameless item", 101), OneItemMenu(L"A", L"A item", 102) };
+    FakeMenu live({ L"", L"A" });
+    live.Set({ 0 }, { 5 });
+    live.Set({ 1 }, { 6 });
+    assert((LinkedNames(MenuLink::Link(bar, live, {})) == std::vector<std::wstring>{ L"A item" }));
+
+    FakeMenu onlyEmpty({ L"" });
+    onlyEmpty.Set({ 0 }, { 5 });
+    assert(MenuLink::FitScore(std::vector<MenuNode>{ OneItemMenu(L"", L"Nameless item", 101) }, onlyEmpty) == -1);
+    std::cout << "[PASS] TestEmptyTopLevelTitlesNeverMatch\n";
 }
 
 void TestEmptyBarDoesNotFit() {
@@ -997,7 +1084,12 @@ int main() {
     TestListNeedsOnlyItems();
     TestFitScoreRejectsOtherLanguage();
     TestFitScoreCountsLinks();
-    TestTopLevelTitlesMustMatchExactly();
+    TestTopLevelFitRules();
+    TestTopLevelMenusMatchedByTitle();
+    TestDuplicateTopLevelTitlesAreNotMatched();
+    TestTopLevelOrderMustAgree();
+    TestNoCommonTopLevelTitleDoesNotFit();
+    TestEmptyTopLevelTitlesNeverMatch();
     TestEmptyBarDoesNotFit();
     TestTypeMismatchDropsSegment();
     TestTypeMismatchAtAnchorDropsSegment();
