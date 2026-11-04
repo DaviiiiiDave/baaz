@@ -749,6 +749,20 @@ void TestListNeedsOnlyItems() {
     std::cout << "[PASS] TestListNeedsOnlyItems\n";
 }
 
+// PINNED ACCEPTED RISK: this documents today's behaviour, it does not endorse it. Around a placeholder
+// region whole parts are anchored by position, so a new live part the scheme does not hold (Y1, Y2 after
+// the last separator) takes the place of the last scheme part (E, F), whose real entries sit in front of
+// it. Not observed in Archicad; see MenuLink.hpp.
+void TestNewLivePartTakesPlaceOfLastSchemePart() {
+    const std::vector<MenuNode> menu = { ItemNode(L"S0", 11), SeparatorNode(), ItemNode(L"P", kGraphicOverridePlaceholder),
+                                         SeparatorNode(), ItemNode(L"E", 12), ItemNode(L"F", 13) };
+    // Live: S0 | the list | the real E and F | the new part Y1, Y2
+    auto commands = LinkOne(menu, { 1, S, 10, 11, S, 2, 3, S, 20, 21 });
+    assert((LinkedNames(commands) == std::vector<std::wstring>{ L"S0", L"E", L"F" }));
+    assert((LinkedIds(commands) == std::vector<unsigned>{ 1, 20, 21 }));   // E and F run Y1 and Y2
+    std::cout << "[PASS] TestNewLivePartTakesPlaceOfLastSchemePart\n";
+}
+
 void TestFitScoreRejectsOtherLanguage() {
     auto bar = SchemeReader::ReadFloorPlanMenuBar(ReadFixture());
     FakeMenu live({ L"View", L"Document" });
@@ -1230,6 +1244,7 @@ int main() {
     TestListTooShortNotOffered();
     TestListWithoutRegisteredPlaceholderStaysUnlinked();
     TestListNeedsOnlyItems();
+    TestNewLivePartTakesPlaceOfLastSchemePart();
     TestFitScoreRejectsOtherLanguage();
     TestFitScoreCountsLinks();
     TestTopLevelFitRules();

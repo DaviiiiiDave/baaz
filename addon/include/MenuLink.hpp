@@ -49,8 +49,12 @@ public:
     // current as the live menu and on callers re-checking the live entry before running it.
     // The add-ons loaded now may differ from those of the export, so a part (the entries between two
     // separators) with a placeholder links nothing if it holds an Item with a non-zero MDID or lost an
-    // entry to DropAbsentAddOnItems. Remaining risk: in a part without a placeholder, one add-on item
-    // that left since the export and another that came at the same position keep the count equal.
+    // entry to DropAbsentAddOnItems. Remaining risks, both accepted and not observed in Archicad:
+    // - in a part without a placeholder, one add-on item that left since the export and another that
+    //   came at the same position keep the count equal;
+    // - around a placeholder region whole parts are anchored by position, so a new live part the
+    //   scheme does not hold (e.g. an add-on's own part after a separator at the end of a menu) can
+    //   take the place of the last scheme part, whose commands then run the new part's entries.
     // notSearchable, if given: the Items (not placeholders) of the top-level menus whose title matched,
     // at any depth, that a new export can make searchable: linked without a name, or not linked
     // because a count differs (a part, a popup, the parts around a placeholder region, a menu whose
