@@ -198,9 +198,12 @@ static void WriteTestFile(const std::filesystem::path& path, const std::string& 
     SetWriteTime(path, TimeAt(secondsFromBase));
 }
 
-// A profile naming the given command schemes next to a scheme of another component
+static const char* const kProfileNamespace = " xmlns=\"http://www.graphisoft.com/Development/WorkEnvironment/Profile/2005/01\"";
+
+// A profile naming the given command schemes next to a scheme of another component, laid out as Archicad writes it
 static std::string ProfileXml(const std::vector<const char*>& commandSchemeGuids) {
-    std::string xml = "<Profile guid=\"CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC\">"
+    std::string xml = std::string("\xEF\xBB\xBF<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                                  "<Profile guid=\"CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC\" name=\"x\"") + kProfileNamespace + ">"
                       "<SchemeRef componentType=\"D3EC122F-0A7F-4B14-94D0-0A6B7FFA66C3\" guid=\"DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD\" name=\"\"/>";
     for (const char* guid : commandSchemeGuids) {
         xml += std::string("<SchemeRef componentType=\"") + kComponentType + "\" guid=\"" + guid + "\" name=\"x\"/>";
@@ -663,6 +666,21 @@ void TestOnlyProfileSchemeIsUsed() {
     std::cout << "[PASS] TestOnlyProfileSchemeIsUsed\n";
 }
 
+// Folder and file names are localized: the profile in use is found by its content, the named profiles by
+// the ProfileSet.xml of the folder they lie in
+void TestProfileFoundByContent() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    WriteSchemesAAndB(folders);
+    WriteTestFile(folders.ArchicadFolder() / L"Recently used" / L"Profil" / L"active.xml", ProfileXml({ kGuidA }), 0);
+    WriteTestFile(folders.ArchicadFolder() / L"Named" / L"ProfileSet.xml", "<ProfileSet/>", 0);
+    WriteTestFile(folders.ArchicadFolder() / L"Named" / L"Profil" / L"other.xml", ProfileXml({ kGuidB }), 0);
+    // An XML that is not a profile says nothing, whatever it names
+    WriteTestFile(folders.ArchicadFolder() / L"Reports" / L"report.xml", Replaced(ProfileXml({ kGuidB }), "<Profile ", "<ProfileSet "), 0);
+    assert(Titles(IndexOf(frame.Hwnd()).commands) == kAlphaBeta);
+    std::cout << "[PASS] TestProfileFoundByContent\n";
+}
+
 void TestNamedProfilesAreNotTheActiveProfile() {
     TestFrame frame(Fill::Normal);
     TestFolders folders;
@@ -688,6 +706,7 @@ void TestMissingOrAmbiguousProfileOffersNothing() {
     AssertNothingOfferedForProfiles({ ProfileXml({ kGuidA, kGuidB }) });              // two command schemes
     AssertNothingOfferedForProfiles({ ProfileXml({}) });                              // no command scheme
     AssertNothingOfferedForProfiles({ "this is not a profile" });
+    AssertNothingOfferedForProfiles({ Replaced(ProfileXml({ kGuidA }), kProfileNamespace, "") });   // not in the profile namespace
     {   // Only named profiles: which one is in use is unknown
         TestFrame frame(Fill::Normal);
         TestFolders folders;
@@ -981,6 +1000,7 @@ int main() {
     TestNoExportAddOnPartLinksNoWorkEnvironment();
     TestCountMismatchPartIsCounted();
     TestOnlyProfileSchemeIsUsed();
+    TestProfileFoundByContent();
     TestNamedProfilesAreNotTheActiveProfile();
     TestMissingOrAmbiguousProfileOffersNothing();
     TestProfileSchemeUnreadableOffersNothing();

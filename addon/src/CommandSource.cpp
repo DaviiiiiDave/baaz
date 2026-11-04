@@ -17,14 +17,16 @@ namespace fs = std::filesystem;
 
 static const std::string_view kSchemeMarker = "6FCD168F-A26C-4547-AF9D-ED9A5FC54DD7";
 static const size_t kMarkerBytes = 512;
+// The root tag of a profile holds the profile's name, which the user chooses
+static const size_t kProfileHeadBytes = 4096;
+static const std::string_view kProfileNamespace = "http://www.graphisoft.com/Development/WorkEnvironment/Profile/2005/01";
 // Levels below a searched folder that are searched
 static const int kMaxSchemeDepth = 3;
 // The id of WM_COMMAND is 16 bits wide
 static const unsigned kMaxCommandId = 0xFFFF;
 // Options > Work Environment, a built-in command
 static const unsigned kWorkEnvironmentNumber = 7682;
-// The profile in use is not in the folder that holds ProfileSet.xml (the named profiles)
-static const wchar_t* const kProfileFolder = L"Profile";
+// The named profiles lie in the folder that holds ProfileSet.xml; the profile in use does not
 static const wchar_t* const kProfileSetFile = L"ProfileSet.xml";
 
 std::vector<CommandSource::CachedExport> CommandSource::s_exports;
@@ -155,26 +157,39 @@ static bool ReadWriteTime(const fs::path& path, FILETIME& time, unsigned long lo
     return true;
 }
 
+// Files told apart by the start of their content, not by their names
+struct FileKind {
+    const wchar_t* extension;
+    size_t headBytes;
+    bool (*recognise)(std::string_view head);
+};
+
+static bool HasSchemeMarker(std::string_view head) { return head.find(kSchemeMarker) != std::string_view::npos; }
+
+static const FileKind kExportFile = { L".xml", kMarkerBytes, HasSchemeMarker };
+static const FileKind kSchemeFile = { L".bin", kMarkerBytes, HasSchemeMarker };
+
 // false if the file cannot be read
-static bool HasSchemeMarker(const fs::path& path, bool& found) {
+static bool IsOfKind(const fs::path& path, const FileKind& kind, bool& found) {
     std::ifstream file(path, std::ios::binary);
     if (!file.is_open()) return false;
-    char head[kMarkerBytes];
-    file.read(head, sizeof(head));
+    std::string head(kind.headBytes, '\0');
+    file.read(head.data(), static_cast<std::streamsize>(head.size()));
     if (file.bad()) return false;
-    found = std::string_view(head, static_cast<size_t>(file.gcount())).find(kSchemeMarker) != std::string_view::npos;
+    head.resize(static_cast<size_t>(file.gcount()));
+    found = kind.recognise(head);
     return true;
 }
 
-// Adds the file if it is a regular file with the extension and the scheme marker; false if that cannot be told
+// Adds the file if it is a regular file of that kind; false if that cannot be told
 template <typename Cached>
-static bool AddIfScheme(const fs::directory_entry& entry, const wchar_t* extension, std::vector<Cached>& found) {
+static bool AddIfOfKind(const fs::directory_entry& entry, const FileKind& kind, std::vector<Cached>& found) {
     std::error_code error;
     const bool regular = entry.is_regular_file(error);
     if (error) return false;
-    if (!regular || !HasExtension(entry.path(), extension)) return true;
+    if (!regular || !HasExtension(entry.path(), kind.extension)) return true;
     bool marked = false;
-    if (!HasSchemeMarker(entry.path(), marked)) return false;
+    if (!IsOfKind(entry.path(), kind, marked)) return false;
     if (!marked) return true;
     Cached file;
     file.path = entry.path().wstring();
@@ -183,15 +198,15 @@ static bool AddIfScheme(const fs::directory_entry& entry, const wchar_t* extensi
     return true;
 }
 
-// The scheme files below the folder (found by their marker, not by name). false if the folder could not
-// be listed completely: a file left out could be the one that counts.
+// The files of that kind below the folder. false if the folder could not be listed completely: a file
+// left out could be the one that counts.
 template <typename Cached>
-static bool ListSchemeFiles(const fs::path& folder, const wchar_t* extension, std::vector<Cached>& found) {
+static bool ListFiles(const fs::path& folder, const FileKind& kind, std::vector<Cached>& found) {
     std::error_code error;
     fs::recursive_directory_iterator it(folder, error);
     for (; !error && it != fs::recursive_directory_iterator(); it.increment(error)) {
         if (it.depth() >= kMaxSchemeDepth) it.disable_recursion_pending();
-        if (!AddIfScheme(*it, extension, found)) return false;
+        if (!AddIfOfKind(*it, kind, found)) return false;
     }
     return !error;
 }
@@ -231,7 +246,7 @@ static bool ReadExport(CommandSource::CachedExport& file) {
 
 std::vector<CommandSource::CachedExport> CommandSource::LoadExports(const std::wstring& folder) {
     std::vector<CachedExport> listed;
-    if (!ListSchemeFiles(fs::path(folder), L".xml", listed)) listed.clear();
+    if (!ListFiles(fs::path(folder), kExportFile, listed)) listed.clear();
     return Refresh(s_exports, std::move(listed), ReadExport);
 }
 
@@ -311,45 +326,51 @@ static bool ReadProfile(CommandSource::CachedProfile& file) {
     return true;
 }
 
-// false if the folder could not be read completely
-static bool AddProfileFiles(const fs::path& folder, std::vector<CommandSource::CachedProfile>& profiles) {
-    std::error_code error;
-    for (fs::directory_iterator it(folder, error), end; !error && it != end; it.increment(error)) {
-        std::error_code entryError;
-        const bool regular = it->is_regular_file(entryError);
-        if (entryError) return false;
-        if (!regular || !HasExtension(it->path(), L".xml")) continue;
-        CommandSource::CachedProfile file;
-        file.path = it->path().wstring();
-        if (!ReadWriteTime(it->path(), file.time, &file.size)) return false;
-        profiles.push_back(std::move(file));
+// The first element tag of the XML text, after the declaration and comments; empty if there is none
+static std::string_view RootTag(std::string_view xml) {
+    size_t at = xml.find('<');
+    while (at != std::string_view::npos && at + 1 < xml.size() && (xml[at + 1] == '?' || xml[at + 1] == '!')) {
+        const size_t end = xml.find('>', at);
+        at = end == std::string_view::npos ? end : xml.find('<', end);
     }
-    return !error;
+    const size_t end = at == std::string_view::npos ? at : xml.find('>', at);
+    return end == std::string_view::npos ? std::string_view() : xml.substr(at, end - at);
 }
 
-// Whether the work environment folder holds the profile in use: a Profile folder and no ProfileSet.xml.
-// The folder names are localized, so only these two names are fixed. false if that cannot be told.
-static bool HoldsProfileInUse(const fs::directory_entry& entry, bool& inUse) {
-    std::error_code error;
-    inUse = false;
-    if (!entry.is_directory(error)) return !error;
-    const fs::path profileFolder = entry.path() / kProfileFolder;
-    const bool hasSet = fs::exists(entry.path() / kProfileSetFile, error);
-    const bool hasProfiles = !error && fs::exists(profileFolder, error) && fs::is_directory(profileFolder, error);
-    inUse = !hasSet && hasProfiles;
-    return !error;
+// A work environment profile: the root element is Profile in the profile namespace
+static bool IsProfile(std::string_view head) {
+    static const std::string_view kName = "<Profile";
+    const std::string_view tag = RootTag(head);
+    if (tag.size() <= kName.size() || tag.substr(0, kName.size()) != kName) return false;
+    return std::isspace(static_cast<unsigned char>(tag[kName.size()])) != 0 && AttributeValue(tag, "xmlns") == kProfileNamespace;
 }
 
-// false if the folders could not be read completely
+static const FileKind kProfileFile = { L".xml", kProfileHeadBytes, IsProfile };
+
+// Whether the file lies in the folder that holds ProfileSet.xml, or below it, up to the Archicad folder.
+// false if that cannot be told.
+static bool IsNamedProfile(const fs::path& file, const fs::path& archicadFolder, bool& named) {
+    named = false;
+    for (fs::path folder = file.parent_path(); !named; folder = folder.parent_path()) {
+        std::error_code error;
+        named = fs::exists(folder / kProfileSetFile, error);
+        if (error) return false;
+        if (folder == archicadFolder || folder == folder.parent_path()) break;
+    }
+    return true;
+}
+
+// The profiles below the Archicad folders that are not named profiles; false if the folders could not be
+// read completely
 static bool ListProfiles(const std::vector<fs::path>& archicadFolders, std::vector<CommandSource::CachedProfile>& profiles) {
     for (const fs::path& archicadFolder : archicadFolders) {
-        std::error_code error;
-        for (fs::directory_iterator it(archicadFolder, error), end; !error && it != end; it.increment(error)) {
-            bool inUse = false;
-            if (!HoldsProfileInUse(*it, inUse)) return false;
-            if (inUse && !AddProfileFiles(it->path() / kProfileFolder, profiles)) return false;
+        std::vector<CommandSource::CachedProfile> found;
+        if (!ListFiles(archicadFolder, kProfileFile, found)) return false;
+        for (CommandSource::CachedProfile& file : found) {
+            bool named = false;
+            if (!IsNamedProfile(fs::path(file.path), archicadFolder, named)) return false;
+            if (!named) profiles.push_back(std::move(file));
         }
-        if (error) return false;
     }
     return true;
 }
@@ -367,7 +388,7 @@ bool CommandSource::LoadSchemes(const Locations& where, std::vector<CachedScheme
     std::vector<CachedScheme> listed;
     if (!ArchicadFolders(where, folders)) return false;
     for (const fs::path& folder : folders) {
-        if (!ListSchemeFiles(folder, L".bin", listed)) return false;
+        if (!ListFiles(folder, kSchemeFile, listed)) return false;
     }
     schemes = Refresh(s_schemes, std::move(listed), ReadScheme);
     activeGuid = ActiveSchemeGuid(s_profiles, folders);
