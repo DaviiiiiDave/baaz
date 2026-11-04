@@ -55,7 +55,7 @@ target_compile_definitions(test_live_menu PRIVATE UNICODE _UNICODE)
 target_link_libraries(test_live_menu PRIVATE user32)
 add_test(NAME LiveMenu COMMAND test_live_menu)
 
-# Hint texts and selection rule of the command line; no Win32 calls
+# Hint texts of the command line; no Win32 calls
 add_executable(test_command_hint
     test_command_hint.cpp
     ../addon/src/CommandHint.cpp

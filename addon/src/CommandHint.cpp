@@ -36,8 +36,4 @@ HintRow MakeHintRow(CommandState state, size_t notSearchable, bool workEnvironme
     return row;
 }
 
-size_t DefaultSelection(bool, size_t) {
-    return 0;
-}
-
 } // namespace Baaz

@@ -65,14 +65,6 @@ void TestGuideNamesMenuPathWithoutCommand() {
     std::cout << "[PASS] TestGuideNamesMenuPathWithoutCommand\n";
 }
 
-void TestHintIsNeverDefaultSelection() {
-    assert(DefaultSelection(true, 5) == 0);
-    assert(DefaultSelection(true, 1) == 0);
-    assert(DefaultSelection(true, 0) == 0);
-    assert(DefaultSelection(false, 5) == 0);
-    std::cout << "[PASS] TestHintIsNeverDefaultSelection\n";
-}
-
 void TestRefusedRunIsShownOnce() {
     // Ready has no hint of its own: the refusal is the row
     const HintRow refused = MakeHintRow(CommandState::Ready, 0, true, true);
@@ -92,7 +84,6 @@ int main() {
     TestNewCommandsHintCounts();
     TestUnreadableHintHasNoGuide();
     TestGuideNamesMenuPathWithoutCommand();
-    TestHintIsNeverDefaultSelection();
     TestRefusedRunIsShownOnce();
     std::cout << "ALL COMMAND HINT TESTS PASSED\n";
     return 0;

@@ -775,7 +775,7 @@ void TestTopLevelFitRules() {
     assert(MenuLink::FitScore(bar, none) == -1 && MenuLink::Link(bar, none, {}).empty());
 
     // Top-level menus are matched by title, so a missing or an extra live menu no longer rejects the
-    // bar: the menus that are in both are linked, the others are ignored (they were -1 before)
+    // bar: the menus that are in both are linked, the others are ignored
     FakeMenu fewer({ L"Ablage" });
     fewer.Set({ 0 }, { 77 });
     assert(MenuLink::FitScore(bar, fewer) == 1);

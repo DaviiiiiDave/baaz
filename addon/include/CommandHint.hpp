@@ -16,8 +16,4 @@ struct HintRow {
 // lastRunRefused: the last command Baaz was asked to run did not run (shown once, by the caller)
 HintRow MakeHintRow(CommandState state, size_t notSearchable, bool workEnvironmentFound, bool lastRunRefused);
 
-// Index of the first result row selected after a query. The hint row is not a result, so it never
-// shifts or takes this selection.
-size_t DefaultSelection(bool hasHint, size_t resultCount);
-
 } // namespace Baaz

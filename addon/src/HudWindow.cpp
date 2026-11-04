@@ -261,7 +261,7 @@ void HudWindow::Reposition() {
 void HudWindow::SetQuery(std::wstring query) {
     s_query = std::move(query);
     s_results = SearchEngine::Query(s_query);
-    s_selectedIndex = DefaultSelection(!s_hint.title.empty(), s_results.size());
+    s_selectedIndex = 0;
     s_hintSelected = false;
     Reposition();
     Render();
