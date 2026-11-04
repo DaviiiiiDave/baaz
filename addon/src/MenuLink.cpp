@@ -77,7 +77,8 @@ struct LinkRun {
     MenuSource& source;
     const std::vector<DynamicList>& lists;
     std::vector<LinkedCommand> commands;
-    size_t namedItems = 0;   // linked Items of the scheme that have a name
+    size_t namedItems = 0;       // linked Items of the scheme that have a name
+    size_t uncertainItems = 0;   // Items (not placeholders) of the parts skipped as uncertain
 };
 
 } // namespace
@@ -104,6 +105,16 @@ static bool IsUncertainPart(const std::vector<MenuNode>& catalogue, const Segmen
         if (node.partLostEntries || (node.type == MenuNodeType::Item && (node.mdid1 != 0 || node.mdid2 != 0))) return true;
     }
     return false;
+}
+
+// Items that are not placeholders, at any depth
+static size_t CountItems(std::vector<MenuNode>::const_iterator first, std::vector<MenuNode>::const_iterator last) {
+    size_t count = 0;
+    for (; first != last; ++first) {
+        if (first->type == MenuNodeType::Popup) count += CountItems(first->children.begin(), first->children.end());
+        else if (first->type == MenuNodeType::Item && !IsPlaceholder(*first)) ++count;
+    }
+    return count;
 }
 
 static void AddFromStart(std::vector<EntryPair>& pairs, const Segment& catalogue, const Segment& live, size_t count) {
@@ -195,6 +206,11 @@ private:
     }
 
     void PairSegment(const Segment& catalogue, const Segment& live) {
+        // An export cannot cure a skipped uncertain part, so its Items are not counted as not searchable
+        if (IsSkippedAsUncertain(catalogue)) {
+            m_run.uncertainItems += CountItems(m_catalogue.begin() + catalogue.begin, m_catalogue.begin() + catalogue.end);
+            return;
+        }
         std::vector<EntryPair> pairs = SegmentPairs(catalogue, live);
         for (const EntryPair& pair : pairs) {
             if (m_catalogue[pair.catalogue].type != m_live[pair.live].type) return;
@@ -202,10 +218,13 @@ private:
         m_pairs.insert(m_pairs.end(), pairs.begin(), pairs.end());
     }
 
+    bool IsSkippedAsUncertain(const Segment& catalogue) const {
+        return FindPlaceholders(catalogue).count > 0 && IsUncertainPart(m_catalogue, catalogue);
+    }
+
     std::vector<EntryPair> SegmentPairs(const Segment& catalogue, const Segment& live) const {
         std::vector<EntryPair> pairs;
         const PlaceholderSpan span = FindPlaceholders(catalogue);
-        if (span.count > 0 && IsUncertainPart(m_catalogue, catalogue)) return pairs;
         // One placeholder cannot change the count unless it became exactly one entry. With two,
         // one may have grown while the other vanished, so only the entries at the ends are sure.
         if (catalogue.size() == live.size() && span.count <= 1) {
@@ -322,16 +341,6 @@ static bool MatchMenus(const std::vector<MenuNode>& bar, const std::vector<std::
     return !matched.empty();
 }
 
-// Items that are not placeholders, at any depth
-static size_t CountItems(const std::vector<MenuNode>& nodes) {
-    size_t count = 0;
-    for (const MenuNode& node : nodes) {
-        if (node.type == MenuNodeType::Popup) count += CountItems(node.children);
-        else if (node.type == MenuNodeType::Item && !IsPlaceholder(node)) ++count;
-    }
-    return count;
-}
-
 // false if the live menu bar has no menu in common with the catalogue, or in another order
 static bool LinkBar(const std::vector<MenuNode>& bar, MenuSource& live, const std::vector<DynamicList>& lists,
                     std::vector<LinkedCommand>& linked, size_t& notSearchable) {
@@ -341,12 +350,12 @@ static bool LinkBar(const std::vector<MenuNode>& bar, MenuSource& live, const st
     size_t items = 0;
     for (const MatchedMenu& menu : matched) {
         MenuLevel(run, bar[menu.catalogue].children, { static_cast<int>(menu.live) }, bar[menu.catalogue].name).Link();
-        items += CountItems(bar[menu.catalogue].children);
+        items += CountItems(bar[menu.catalogue].children.begin(), bar[menu.catalogue].children.end());
     }
     std::sort(run.commands.begin(), run.commands.end(),
               [](const LinkedCommand& a, const LinkedCommand& b) { return a.position < b.position; });
     linked = std::move(run.commands);
-    notSearchable = items - run.namedItems;
+    notSearchable = items - run.namedItems - run.uncertainItems;
     return true;
 }
 

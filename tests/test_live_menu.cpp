@@ -579,7 +579,8 @@ void TestUnloadedAddOnNextToPlaceholderLinksNothing() {
     frame.List({ 201, 801, 802, 202, 0, 203 });
     const CommandIndex index = IndexOf(frame.Hwnd());
     assert((Titles(index.commands) == std::vector<std::wstring>{ L"C" }) && (LiveIds(index.commands) == std::vector<unsigned>{ 203 }));
-    assert(index.state == CommandState::NewCommands && index.notSearchable == 3);
+    // The part is skipped because an export cannot cure it, so it is not counted
+    assert(index.state == CommandState::Ready && index.notSearchable == 0);
     std::cout << "[PASS] TestUnloadedAddOnNextToPlaceholderLinksNothing\n";
 }
 
@@ -594,8 +595,23 @@ void TestAddOnInstalledSinceExportLinksNothing() {
     frame.List({ 209, 201, 801, 202, 0, 203 });
     const CommandIndex index = IndexOf(frame.Hwnd());
     assert((Titles(index.commands) == std::vector<std::wstring>{ L"C" }) && (LiveIds(index.commands) == std::vector<unsigned>{ 203 }));
-    assert(index.state == CommandState::NewCommands && index.notSearchable == 2);   // Y is not counted
+    assert(index.state == CommandState::Ready && index.notSearchable == 0);
     std::cout << "[PASS] TestAddOnInstalledSinceExportLinksNothing\n";
+}
+
+// [X, A, P, B] against the live [A, B] (X not loaded, P gave nothing): the count differs as well, but the part is
+// uncertain, and uncertain wins: it is skipped and not counted
+void TestUncertainPartWithCountMismatchIsNotCounted() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    folders.WriteExport(0, ExportABC(XmlAddOnItem(9, "X")));
+    folders.WriteBin(TestBin({ Item(9, 5, 6), Item(1, 0, 0), Item(kGraphicOverrides, 0, 0), Item(2, 0, 0), Separator(), Item(3, 0, 0) }), 0);
+    folders.UseScheme();
+    frame.List({ 201, 202, 0, 203 });
+    const CommandIndex index = IndexOf(frame.Hwnd());
+    assert((Titles(index.commands) == std::vector<std::wstring>{ L"C" }) && (LiveIds(index.commands) == std::vector<unsigned>{ 203 }));
+    assert(index.state == CommandState::Ready && index.notSearchable == 0);
+    std::cout << "[PASS] TestUncertainPartWithCountMismatchIsNotCounted\n";
 }
 
 void TestBuiltInPartAroundPlaceholderStillLinks() {
@@ -996,6 +1012,7 @@ int main() {
     TestUnloadedAddOnItemsDoNotBlockLinking();
     TestUnloadedAddOnNextToPlaceholderLinksNothing();
     TestAddOnInstalledSinceExportLinksNothing();
+    TestUncertainPartWithCountMismatchIsNotCounted();
     TestBuiltInPartAroundPlaceholderStillLinks();
     TestNoExportAddOnPartLinksNoWorkEnvironment();
     TestCountMismatchPartIsCounted();

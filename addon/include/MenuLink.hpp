@@ -52,7 +52,11 @@ public:
     // entry to DropAbsentAddOnItems. Remaining risk: in a part without a placeholder, one add-on item
     // that left since the export and another that came at the same position keep the count equal.
     // notSearchable, if given: the Items (not placeholders) of the top-level menus whose title matched,
-    // at any depth, that are not linked or are linked without a name
+    // at any depth, that a new export can make searchable: linked without a name, or not linked
+    // because a count differs (a part, a popup, the parts around a placeholder region, a menu whose
+    // parts do not match). Not counted: the Items of a part skipped as uncertain (see above), also
+    // when its count differs as well, placeholders, menus not in the live bar, items dropped by
+    // DropAbsentAddOnItems.
     static std::vector<LinkedCommand> Link(const std::vector<MenuNode>& bar, MenuSource& live,
                                            const std::vector<DynamicList>& lists, size_t* notSearchable = nullptr);
     // -1 if no top-level menu has a title in common with the live bar, or the common ones are in
