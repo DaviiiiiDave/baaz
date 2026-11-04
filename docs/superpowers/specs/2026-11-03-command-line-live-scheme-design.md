@@ -87,9 +87,18 @@ current, and takes only the item **names** from an export.
   nothing if it contains an `Item` with a non-zero MDID or lost an `Item` or popup to the rule
   above; without an export every non-zero-MDID `Item` counts as such. Parts without a
   placeholder still require the exact item count, so a single add-on change there leaves the
-  part unlinked. Remaining risk, accepted and documented in `MenuLink.hpp`: in a part without a
-  placeholder, one add-on unloaded and another loaded at the same position since the export
-  keeps the count equal. Items left unlinked by any rule are counted for the hint (section 5).
+  part unlinked. Remaining risks, accepted and documented in `MenuLink.hpp`: (1) in a part
+  without a placeholder, one add-on unloaded and another loaded at the same position since the
+  export keeps the count equal; (2) around a placeholder region whole parts are anchored by
+  position, so a new live part that the scheme does not hold (for example an add-on's own part
+  after a separator at the end of a menu) can take the place of the last scheme part (re-review
+  2026-11-04, I-1, decided by Dave: document and pin with a test; not observed in Archicad).
+  Items left unlinked because their part is uncertain are **not** counted for the hint
+  (section 5; Dave 2026-11-04): no export can make them linkable.
+- **No live source for "add-on loaded".** `ACAPI_AddOnAddOnCommunication_Test` (AC29 and AC30
+  DevKits) tells installed from not installed, but a probe in Archicad 29 (2026-11-04) showed an
+  add-on switched off in the Add-On Manager still reads as present. It therefore cannot replace
+  the export as the record of loaded add-ons, and the rule above stays.
 - **Which `.bin` is the active scheme: only the one the active profile names** (decided by
   Dave 2026-11-04, option A; replaces an earlier choice by fit score and write time, whose
   fallbacks could pick an inactive scheme such as the standard one and link wrong names).
@@ -135,16 +144,20 @@ dann eine Mini-Anleitung"). Views, tools and everything else stay searchable as 
 | State | Hint (wording left to the builder, English like the other HUD texts) |
 |---|---|
 | No export found | Commands need one export. Guide: Enter opens Work Environment → export the profile to `…\.baaz\commands` → open the HUD again |
-| Some items cannot be offered: no name (added after the export) or not linked (section 3) | *N* commands cannot be searched yet. Same guide |
+| Some items cannot be offered for a reason a new export can fix: no name (added after the export) or a count that does not match (section 3) | *N* commands cannot be searched yet. Same guide |
 | The active profile or its `.bin` cannot be found or read (unknown format, for example after an Archicad update), or that `.bin` fits no menu | Command list cannot be read for this Archicad version. No commands are offered |
 
-- *N* (decided by Dave 2026-11-04, option A of the final review) counts the non-placeholder
-  `Item`s of top-level menus whose title matched the live bar that are either linked but have
-  no name in the export, or not linked at all (count mismatch, an uncertain add-on part,
-  section 3). Placeholders, menus whose title is not in the live bar (for example *Apple*) and
-  items removed by the add-on rule of section 3 are not counted. Right after a fresh export of
-  the current state, *N* is therefore 0 unless a part stays uncertain (a dynamic list next to an
-  add-on command); such items stay counted, because they really are not searchable.
+- *N* counts only what a new export can fix (Dave 2026-11-04, option A of the re-review; it
+  narrows option A of the final review). It counts the non-placeholder `Item`s of top-level
+  menus whose title matched the live bar that are either linked but have no name in the export,
+  or not linked because a count did not match (a part, a popup or the parts around a
+  placeholder region). Not counted: items of a part left unlinked because it is uncertain
+  (section 3, also when that part's count does not match either), placeholders, menus whose
+  title is not in the live bar (for example *Apple*) and items removed by the add-on rule of
+  section 3. Those uncertain-part commands are simply not offered, without a hint: measured on
+  the real schemes (re-review 2026-11-04) they are tens of commands that no export can make
+  linkable (37 in the office scheme, 18 in the AC29 standard scheme), and a hint that never goes
+  away would teach users to ignore it. Right after a fresh export of the current state *N* is 0.
 - *(My call)* The hint row is never the default selection, takes no slot from the result count,
   is reachable with the arrow keys and runs on Enter or click only, not on Space. Typing
   `lineal` and pressing Enter must keep running *Lineal*.
