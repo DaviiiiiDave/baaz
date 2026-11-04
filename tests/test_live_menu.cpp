@@ -15,9 +15,11 @@ using namespace Baaz;
 
 // Normal: Alpha 255, separator, Beta 300. Shifted: one more active entry in front. ExtraItem: one more
 // entry in each segment. Nested: a submenu "Sub" at index 3 that is filled in its own WM_INITMENUPOPUP.
-enum class Fill { Normal, Grayed, ChangedId, Shifted, ExtraItem, Nested };
+// Listed: the ids in g_listed, 0 for a separator.
+enum class Fill { Normal, Grayed, ChangedId, Shifted, ExtraItem, Nested, Listed };
 
 static Fill g_fill = Fill::Normal;
+static std::vector<unsigned> g_listed;
 static HMENU g_popup = nullptr;
 static HMENU g_sub = nullptr;
 static std::vector<unsigned> g_commands;
@@ -26,8 +28,16 @@ static void ClearMenu(HMENU menu) {
     while (GetMenuItemCount(menu) > 0) RemoveMenu(menu, 0, MF_BYPOSITION);
 }
 
+static void FillListed(HMENU popup) {
+    for (unsigned id : g_listed) {
+        if (id == 0) AppendMenuW(popup, MF_SEPARATOR, 0, nullptr);
+        else AppendMenuW(popup, MF_STRING, id, L"Entry");
+    }
+}
+
 static void FillPopup(HMENU popup) {
     ClearMenu(popup);
+    if (g_fill == Fill::Listed) return FillListed(popup);
     if (g_fill == Fill::Shifted) AppendMenuW(popup, MF_STRING, 400, L"Shifted");
     UINT firstFlags = g_fill == Fill::Grayed ? (MF_STRING | MF_GRAYED) : MF_STRING;
     UINT firstId = g_fill == Fill::ChangedId ? 256 : 255;
@@ -101,6 +111,10 @@ public:
 
     HWND Hwnd() const { return m_hwnd; }
     void ChangeFill(Fill fill) { g_fill = fill; }
+    void List(std::vector<unsigned> ids) {
+        g_fill = Fill::Listed;
+        g_listed = std::move(ids);
+    }
 
 private:
     HWND m_hwnd = nullptr;
@@ -527,6 +541,86 @@ void TestUnloadedAddOnItemsDoNotBlockLinking() {
     std::cout << "[PASS] TestUnloadedAddOnItemsDoNotBlockLinking\n";
 }
 
+// --- Add-on changes since the export: parts around a placeholder --------------------------------
+
+static const unsigned kGraphicOverrides = 23040;
+
+// An item of the add-on with the MDID pair 5:6
+static std::string XmlAddOnItem(unsigned number, const char* name) {
+    return "<Item command=\"" + std::to_string(number) + "-0x5-0x6\" comment=\"" + name + "\"/>";
+}
+
+static std::string TestMenuXml(const std::string& items) {
+    return ExportXml("<Menu ID=\"M\" title=\"&amp;Test\">" + items + "</Menu>");
+}
+
+// The names A, B and C for the built-in commands 1, 2 and 3, as in [A, B | C]
+static std::string ExportABC(const std::string& before = "") {
+    return TestMenuXml(before + XmlItem(1, "A") + XmlItem(2, "B") + "<Separator/>" + XmlItem(3, "C"));
+}
+
+static std::vector<unsigned> LiveIds(const std::vector<SearchItem>& items) {
+    std::vector<unsigned> ids;
+    for (const SearchItem& item : items) ids.push_back(item.liveId);
+    return ids;
+}
+
+// The add-on of X was loaded when the export was made and is not loaded now, so X stays in the structure.
+// [X, A, P, B] against the live [A, e1, e2, B]: the counts agree, and pairing one by one would run A for "X".
+void TestUnloadedAddOnNextToPlaceholderLinksNothing() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    folders.WriteExport(0, ExportABC(XmlAddOnItem(9, "X")));
+    folders.WriteBin(TestBin({ Item(9, 5, 6), Item(1, 0, 0), Item(kGraphicOverrides, 0, 0), Item(2, 0, 0), Separator(), Item(3, 0, 0) }), 0);
+    folders.UseScheme();
+    frame.List({ 201, 801, 802, 202, 0, 203 });
+    const CommandIndex index = IndexOf(frame.Hwnd());
+    assert((Titles(index.commands) == std::vector<std::wstring>{ L"C" }) && (LiveIds(index.commands) == std::vector<unsigned>{ 203 }));
+    std::cout << "[PASS] TestUnloadedAddOnNextToPlaceholderLinksNothing\n";
+}
+
+// The add-on of Y was installed after the export, so Y is left out of the structure but is in the live menu.
+// [A, P, B] against the live [Y, A, e1, B]: anchoring at the ends would run Y for "A".
+void TestAddOnInstalledSinceExportLinksNothing() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    folders.WriteExport(0, ExportABC());
+    folders.WriteBin(TestBin({ Item(9, 5, 6), Item(1, 0, 0), Item(kGraphicOverrides, 0, 0), Item(2, 0, 0), Separator(), Item(3, 0, 0) }), 0);
+    folders.UseScheme();
+    frame.List({ 209, 201, 801, 202, 0, 203 });
+    const CommandIndex index = IndexOf(frame.Hwnd());
+    assert((Titles(index.commands) == std::vector<std::wstring>{ L"C" }) && (LiveIds(index.commands) == std::vector<unsigned>{ 203 }));
+    std::cout << "[PASS] TestAddOnInstalledSinceExportLinksNothing\n";
+}
+
+void TestBuiltInPartAroundPlaceholderStillLinks() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    folders.WriteExport(0, ExportABC());
+    folders.WriteBin(TestBin({ Item(1, 0, 0), Item(kGraphicOverrides, 0, 0), Item(2, 0, 0), Separator(), Item(3, 0, 0) }), 0);
+    folders.UseScheme();
+    frame.List({ 201, 801, 802, 202, 0, 203 });
+    const CommandIndex index = IndexOf(frame.Hwnd());
+    assert((Titles(index.commands) == std::vector<std::wstring>{ L"A", L"B", L"C" }));
+    assert((LiveIds(index.commands) == std::vector<unsigned>{ 201, 202, 203 }));
+    assert(index.state == CommandState::Ready && index.unnamed == 0);
+    std::cout << "[PASS] TestBuiltInPartAroundPlaceholderStillLinks\n";
+}
+
+// Without an export every add-on item counts as uncertain. [X, Work Environment, P] against the live
+// [W, e1, e2] (X not loaded): pairing one by one would open e1 for Work Environment.
+void TestNoExportAddOnPartLinksNoWorkEnvironment() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    folders.WriteBin(TestBin({ Item(9, 5, 6), Item(7682, 0, 0), Item(kGraphicOverrides, 0, 0), Separator(), Item(3, 0, 0) }), 0);
+    folders.UseScheme();
+    frame.List({ 210, 801, 802, 0, 203 });
+    const CommandIndex index = IndexOf(frame.Hwnd());
+    assert(index.state == CommandState::NoExport && index.commands.empty());
+    assert(index.workEnvironment.liveId == 0);
+    std::cout << "[PASS] TestNoExportAddOnPartLinksNoWorkEnvironment\n";
+}
+
 // --- Which scheme file is the active one: only the one the profile in use names ---------------
 
 static void AssertNothingOffered(HWND frame) {
@@ -867,6 +961,10 @@ int main() {
     TestMovedCommandKeepsItsName();
     TestMenuChangeWithoutExportStillOffers();
     TestUnloadedAddOnItemsDoNotBlockLinking();
+    TestUnloadedAddOnNextToPlaceholderLinksNothing();
+    TestAddOnInstalledSinceExportLinksNothing();
+    TestBuiltInPartAroundPlaceholderStillLinks();
+    TestNoExportAddOnPartLinksNoWorkEnvironment();
     TestOnlyProfileSchemeIsUsed();
     TestNamedProfilesAreNotTheActiveProfile();
     TestMissingOrAmbiguousProfileOffersNothing();

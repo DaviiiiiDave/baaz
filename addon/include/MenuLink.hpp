@@ -47,6 +47,10 @@ public:
     // any number of live entries, so anchoring around it cannot tell an expanded placeholder from
     // an unexplained extra entry or a missing static item. This relies on a scheme that is as
     // current as the live menu and on callers re-checking the live entry before running it.
+    // The add-ons loaded now may differ from those of the export, so a part (the entries between two
+    // separators) with a placeholder links nothing if it holds an Item with a non-zero MDID or lost an
+    // entry to DropAbsentAddOnItems. Remaining risk: in a part without a placeholder, one add-on item
+    // that left since the export and another that came at the same position keep the count equal.
     static std::vector<LinkedCommand> Link(const std::vector<MenuNode>& bar, MenuSource& live,
                                            const std::vector<DynamicList>& lists);
     // -1 if no top-level menu has a title in common with the live bar, or the common ones are in
@@ -56,7 +60,8 @@ public:
 
 // Removes every Item with a non-zero MDID whose (mdid1, mdid2) occurs in no Item of exportBar, then every
 // Popup that had an Item or Popup before and has none left. The scheme keeps the configured layout of
-// add-ons that are not loaded; the live menu and the export leave those commands out.
+// add-ons that are not loaded; the live menu and the export leave those commands out. The entries left in
+// a part that lost an entry get partLostEntries.
 void DropAbsentAddOnItems(std::vector<MenuNode>& bar, const std::vector<MenuNode>& exportBar);
 
 // Sets the name of every Item of bar whose full command id has an Item in exportBar; others stay as they are.

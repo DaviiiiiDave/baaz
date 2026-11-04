@@ -94,6 +94,17 @@ static std::vector<Segment> SplitSegments(const std::vector<Entry>& entries) {
     return segments;
 }
 
+// The part may have shifted since the export: it holds an add-on item, whose add-on may have been unloaded
+// since, or it lost an entry to DropAbsentAddOnItems, whose add-on may have been loaded since. Next to a
+// placeholder the item count cannot show such a shift.
+static bool IsUncertainPart(const std::vector<MenuNode>& catalogue, const Segment& segment) {
+    for (size_t i = segment.begin; i < segment.end; ++i) {
+        const MenuNode& node = catalogue[i];
+        if (node.partLostEntries || (node.type == MenuNodeType::Item && (node.mdid1 != 0 || node.mdid2 != 0))) return true;
+    }
+    return false;
+}
+
 static void AddFromStart(std::vector<EntryPair>& pairs, const Segment& catalogue, const Segment& live, size_t count) {
     for (size_t i = 0; i < count; ++i) pairs.push_back({ catalogue.begin + i, live.begin + i });
 }
@@ -193,6 +204,7 @@ private:
     std::vector<EntryPair> SegmentPairs(const Segment& catalogue, const Segment& live) const {
         std::vector<EntryPair> pairs;
         const PlaceholderSpan span = FindPlaceholders(catalogue);
+        if (span.count > 0 && IsUncertainPart(m_catalogue, catalogue)) return pairs;
         // One placeholder cannot change the count unless it became exactly one entry. With two,
         // one may have grown while the other vanished, so only the entries at the ends are sure.
         if (catalogue.size() == live.size() && span.count <= 1) {
@@ -220,6 +232,7 @@ private:
     }
 
     void LinkList(const Segment& placeholder, const Segment& entries) {
+        if (IsUncertainPart(m_catalogue, placeholder)) return;
         const DynamicList* list = FindList(m_catalogue[placeholder.begin].commandNumber);
         if (list == nullptr || entries.size() == 0 || list->names.size() < entries.size()) return;
         for (size_t i = entries.begin; i < entries.end; ++i) {
@@ -353,14 +366,29 @@ static bool HoldsItemOrPopup(const std::vector<MenuNode>& nodes) {
     return std::any_of(nodes.begin(), nodes.end(), [](const MenuNode& node) { return node.type != MenuNodeType::Separator; });
 }
 
+// Marks the entries kept since the start of the part, if the part lost an entry
+static void MarkPart(std::vector<MenuNode>& kept, size_t partBegin, bool lost) {
+    if (!lost) return;
+    for (size_t i = partBegin; i < kept.size(); ++i) kept[i].partLostEntries = true;
+}
+
 static void DropAbsent(std::vector<MenuNode>& nodes, const std::set<MdidPair>& present) {
     std::vector<MenuNode> kept;
+    size_t partBegin = 0;
+    bool partLost = false;
     for (MenuNode& node : nodes) {
+        if (node.type == MenuNodeType::Separator) {
+            MarkPart(kept, partBegin, partLost);
+            partBegin = kept.size() + 1;
+            partLost = false;
+        }
         const bool hadContent = node.type == MenuNodeType::Popup && HoldsItemOrPopup(node.children);
         if (node.type == MenuNodeType::Popup) DropAbsent(node.children, present);
         const bool emptied = hadContent && !HoldsItemOrPopup(node.children);
         if (!emptied && !IsAbsentAddOnItem(node, present)) kept.push_back(std::move(node));
+        else partLost = true;
     }
+    MarkPart(kept, partBegin, partLost);
     nodes = std::move(kept);
 }
 

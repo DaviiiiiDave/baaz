@@ -1141,12 +1141,18 @@ void TestLinkedCommandCarriesItsFullId() {
 // Only these ids are replaced by Archicad at run time; the same number with another MDID is a normal command
 void TestPlaceholdersAreKeyedByFullId() {
     const MenuNode notOffered[] = {
-        AddOnNode(L"no variant combinations", 1027, 0x47246d64, 0xbca36043), AddOnNode(L"repeat last command", 1027, 0, 0),
-        AddOnNode(L"reopen last output", 20754, 0, 0), AddOnNode(L"graphic override list", 23040, 0, 0),
+        AddOnNode(L"repeat last command", 1027, 0, 0), AddOnNode(L"reopen last output", 20754, 0, 0),
+        AddOnNode(L"graphic override list", 23040, 0, 0),
     };
     for (const MenuNode& node : notOffered) {
         assert(LinkOne({ ItemNode(L"A", 11), node, ItemNode(L"B", 12) }, { 1, 2, 3 }).size() == 2);
     }
+    // The list of an add-on is an add-on item too, so its part links nothing. In a part of its own it is
+    // anchored around like any placeholder: an ordinary item would leave the extra live part unexplained.
+    const MenuNode addOnList = AddOnNode(L"no variant combinations", 1027, 0x47246d64, 0xbca36043);
+    assert(LinkOne({ ItemNode(L"A", 11), addOnList, ItemNode(L"B", 12) }, { 1, 2, 3 }).empty());
+    assert((LinkedIds(LinkOne({ ItemNode(L"A", 11), SeparatorNode(), addOnList, SeparatorNode(), ItemNode(L"B", 12) },
+                              { 1, S, 5, 6, S, 7, S, 3 })) == std::vector<unsigned>{ 1, 3 }));
     const MenuNode offered[] = {
         AddOnNode(L"select connected horizontal guides", 1027, 0x47246d64, 0x3bbe5ae9), AddOnNode(L"Add-On Manager", 1293, 0, 0),
         AddOnNode(L"same number, add-on MDID", 20754, 1, 2), AddOnNode(L"same number, add-on MDID", kAddOnPlaceholder, 1, 2),
@@ -1156,6 +1162,42 @@ void TestPlaceholdersAreKeyedByFullId() {
         assert(commands.size() == 3 && commands[1].liveId == 2 && commands[1].name == node.name);
     }
     std::cout << "[PASS] TestPlaceholdersAreKeyedByFullId\n";
+}
+
+void TestDroppedEntriesMarkTheirPart() {
+    std::vector<MenuNode> bar = { PopupNode(L"M", { ItemNode(L"a", 10), SeparatorNode(), AddOnNode(L"b", 30, 1, 2), ItemNode(L"c", 11),
+                                                    SeparatorNode(), PopupNode(L"Gone", { AddOnNode(L"d", 31, 1, 2) }), ItemNode(L"e", 12),
+                                                    AddOnNode(L"f", 20, 7, 8), SeparatorNode(), ItemNode(L"g", 13) }) };
+    DropAbsentAddOnItems(bar, ExportOfOneAddOn());
+    const std::vector<MenuNode>& m = bar[0].children;
+    assert(DumpAll(m) == L"I:a#10;S;I:c#11;S;I:e#12;I:f#20;S;I:g#13");
+    // The part that lost an item and the one that lost a popup are marked, the others and the separators are not
+    const bool expected[] = { false, false, true, false, true, true, false, false };
+    for (size_t i = 0; i < m.size(); ++i) assert(m[i].partLostEntries == expected[i]);
+    std::cout << "[PASS] TestDroppedEntriesMarkTheirPart\n";
+}
+
+// A part around a placeholder links nothing if it holds an add-on item or lost an entry to
+// DropAbsentAddOnItems: the add-ons loaded now may not be the ones of the export
+void TestUncertainPartAroundPlaceholderLinksNothing() {
+    const MenuNode list = ItemNode(L"P", kGraphicOverridePlaceholder);
+    assert(LinkOne({ AddOnNode(L"X", 9, 5, 6), ItemNode(L"A", 11), list, ItemNode(L"B", 12) }, { 1, 2, 3, 4 }).empty());
+    assert(LinkOne({ ItemNode(L"A", 11), list, AddOnNode(L"X", 9, 5, 6) }, { 1, 2, 3, 4 }).empty());
+    // Without a placeholder the exact count still decides
+    assert(LinkOne({ AddOnNode(L"X", 9, 5, 6), ItemNode(L"A", 11) }, { 1, 2 }).size() == 2);
+    // Y was dropped, but its add-on may be loaded by now
+    std::vector<MenuNode> bar = OneMenu({ AddOnNode(L"Y", 9, 1, 2), ItemNode(L"A", 11), list, ItemNode(L"B", 12), SeparatorNode(),
+                                          ItemNode(L"C", 13) });
+    DropAbsentAddOnItems(bar, ExportOfOneAddOn());
+    FakeMenu live = OneLive({ 9, 1, 5, 2, S, 3 });
+    assert(LinkedNames(MenuLink::Link(bar, live, {})) == Wide({ L"C" }));
+    // A lone list placeholder whose part lost an entry gives no names to the live part in its place
+    bar = OneMenu({ ItemNode(L"A", 11), SeparatorNode(), AddOnNode(L"Y", 9, 1, 2), list, SeparatorNode(), ItemNode(L"B", 12) });
+    DropAbsentAddOnItems(bar, ExportOfOneAddOn());
+    FakeMenu listLive = OneLive({ 1, S, 9, 10, S, 2 });
+    const std::vector<DynamicList> lists = { { kGraphicOverridePlaceholder, Wide({ L"X", L"Y", L"Z" }) } };
+    assert(LinkedNames(MenuLink::Link(bar, listLive, lists)) == Wide({ L"A", L"B" }));
+    std::cout << "[PASS] TestUncertainPartAroundPlaceholderLinksNothing\n";
 }
 
 int main() {
@@ -1217,6 +1259,8 @@ int main() {
     TestAttachNamesByFullId();
     TestLinkedCommandCarriesItsFullId();
     TestPlaceholdersAreKeyedByFullId();
+    TestDroppedEntriesMarkTheirPart();
+    TestUncertainPartAroundPlaceholderLinksNothing();
     std::cout << "All command line tests passed\n";
     return 0;
 }
