@@ -31,7 +31,7 @@ stages:
 
 1. **`.bin` written by a newer Archicad with a changed layout** → nothing offered, the "cannot be read" hint, no crash. Tests: Task 3a `TestUnknownHeaderIsUnreadable`, `TestUnknownRecordIsUnreadable`, `TestTruncatedIsUnreadable`.
 2. **A command moved to another menu without exporting** → offered and run at its new place. Test: Task 3b `TestMovedCommandKeepsItsName`.
-3. **A command added to a menu after the export** → not offered, counted, "N commands are new" hint. Test: Task 3b `TestUnnamedCommandIsCountedNotOffered`.
+3. **A command added to a menu after the export** → not offered, counted, "Commands not searchable yet: N" hint. Test: Task 3b `TestUnnamedCommandIsCountedNotOffered`.
 4. **The scheme the active profile names is missing or unreadable while other `.bin` files are readable** (for example the standard scheme) → no commands, never another `.bin` (A1). Test: Task 3b `TestProfileSchemeUnreadableOffersNothing`.
 5. **Typing `lineal` and pressing Enter while a hint is shown** → runs *Lineal*, not the hint. Test: Task 3c `TestHintIsNeverDefaultSelection`.
 6. **An add-on menu whose commands are configured but not loaded** (CI Tools: 15 submenus in the `.bin`, 2 live) → removed before linking, the rest of the menu links. Test: Task 3b `TestAbsentAddOnItemsAreDropped`.
@@ -162,7 +162,7 @@ stages:
 - [ ] **Step 2: Run to see them fail.**
 - [ ] **Step 3: Implement** `CommandHint` and wire it: the row is drawn above the results, takes no slot from `maxResults`, is reached with Up from the first result, runs on Enter or click only (Space never), and Enter runs `workEnvironment` through `CommandSource::Run`.
 - [ ] **Step 4: Run the five checks.**
-- [ ] **Step 5: Manual check in Archicad 29** (integration branch as in the base plan; Dave): remove every `.xml` and `.xml.bak` file from `.baaz\commands` → hint "export", Enter opens Work Environment; export the profile into `.baaz\commands`, OK → *Lineal* runs; move *Lineal* to another menu, OK, no export → *Lineal* runs from the new place; add a command the export does not know → "1 commands are new"; type `lineal` + Enter with a hint shown → ruler toggles. Repeat in Archicad 30 when its export of the same state exists.
+- [ ] **Step 5: Manual check in Archicad 29** (integration branch as in the base plan; Dave): remove every `.xml` and `.xml.bak` file from `.baaz\commands` → hint "export", Enter opens Work Environment; export the profile into `.baaz\commands`, OK → *Lineal* runs; move *Lineal* to another menu, OK, no export → *Lineal* runs from the new place; add a command the export does not know → "Commands not searchable yet: 1"; type `lineal` + Enter with a hint shown → ruler toggles. Repeat in Archicad 30 when its export of the same state exists.
 - [ ] **Step 6: Commit.** `feat(command-line): explain missing commands in the HUD`
 
 ## Changes to the base plan
@@ -170,3 +170,12 @@ stages:
 - **Task 3's PR** carries Tasks 3a-3c on the same branch (`feature/befehlszeile-livemenu`), because Task 3 alone never offers commands in the normal export flow (addendum 2). This is one deviation from "one PR per task" and needs Dave's go.
 - **Task 4, README line** becomes: export the whole profile from *Options › Work Environment* into `%USERPROFILE%\.baaz\commands\`; once is enough until new commands are added; the three hints and what they mean; the undocumented `.bin` format and what happens after an Archicad update.
 - **Task 4, ranking and display** stay; the hint row of Task 3c is not a search result and is not ranked.
+
+## Final-review fixes (2026-11-04, one fix wave after Task 3c)
+
+Decided by Dave: C1 option A, I4 option A (addendum sections 3 and 5 updated).
+- **C1** `MenuLink`: wherever linking pairs items around a placeholder, that part of the popup links nothing if it contains an `Item` with a non-zero MDID or lost an `Item`/popup to `DropAbsentAddOnItems`; without an export every non-zero-MDID `Item` counts so. Document the remaining no-placeholder risk in `MenuLink.hpp`. Tests: add-on unloaded since the export (`[X, A, P, B]` against live `[A, e1, e2, B]`) and add-on installed after the export (`[A, P, B]` against live `[Y, A, e1, B]`) link nothing in that part; a part with a placeholder and only built-in items still links; no export + add-on item next to a placeholder links nothing; Work Environment is not linked through such a part.
+- **I4** `CommandSource`/`CommandHint`: N = linked-but-unnamed plus not-linked non-placeholder `Item`s of top-level menus whose title matched; state NewCommands whenever N > 0; title "Commands not searchable yet: N". Tests for a count-mismatch part and an uncertain add-on part.
+- **I1** `test_message_hook.cpp`: find the test's own HUD window (current thread or a test accessor), never by class name across the desktop; `HudWindow::ClickAt` returns early when the HUD is not visible. Test for the hidden-HUD click.
+- **I2** `CommandSource`: find the active profile by content (root element `<Profile>`, not inside the folder holding `ProfileSet.xml`), no folder or file name. Test with a renamed profile folder.
+- **R8/R10**: remove `DefaultSelection` and its constant test (the hook test covers the behaviour), or give it real logic; remove the narrating test comment at `test_command_line_native.cpp:778`.

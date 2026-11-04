@@ -77,10 +77,19 @@ current, and takes only the item **names** from an export.
   (MDID1, MDID2) occurs in no `Item` of the chosen export's floor-plan bar, and then every popup
   that had an `Item` or popup before this removal and has none left. Built-in commands (MDID 0)
   are never removed; popups that were empty already stay. With this rule the office `.bin`
-  equals its export in both bars; the standard scheme is unchanged. Accepted cost: an add-on
-  installed after the export is removed as well; if Archicad shows its commands, positions in
-  that top-level menu no longer fit, so that menu is not linked until the next export (nothing
-  wrong is run), and those commands are not counted as new.
+  equals its export in both bars; the standard scheme is unchanged.
+- **Uncertain add-on parts are not linked** (final review 2026-11-04, decided by Dave, option
+  A). The export only tells which add-ons were loaded *when it was made*. If that changed since
+  (an add-on unloaded, or one installed later and therefore removed by the rule above), a part
+  of a popup that also holds a dynamic list can still have the right item count, and linking by
+  position would then shift names onto other commands (A1). Therefore, wherever linking pairs
+  items around a placeholder (a dynamic list, base spec 4.4), that part of the popup links
+  nothing if it contains an `Item` with a non-zero MDID or lost an `Item` or popup to the rule
+  above; without an export every non-zero-MDID `Item` counts as such. Parts without a
+  placeholder still require the exact item count, so a single add-on change there leaves the
+  part unlinked. Remaining risk, accepted and documented in `MenuLink.hpp`: in a part without a
+  placeholder, one add-on unloaded and another loaded at the same position since the export
+  keeps the count equal. Items left unlinked by any rule are counted for the hint (section 5).
 - **Which `.bin` is the active scheme: only the one the active profile names** (decided by
   Dave 2026-11-04, option A; replaces an earlier choice by fit score and write time, whose
   fallbacks could pick an inactive scheme such as the standard one and link wrong names).
@@ -90,9 +99,10 @@ current, and takes only the item **names** from an export.
   `componentType="6FCD168F-A26C-4547-AF9D-ED9A5FC54DD7"` names the active command scheme GUID.
   A command scheme the user changed without saving it as a named scheme is stored in that same
   folder (`Befehle\Befehle.bin`, unnamed) and is then the one named. `ProfileSet.xml` holds only
-  defaults. Baaz finds the profile without localized folder names: under the running Archicad's
-  `%APPDATA%\GRAPHISOFT\Archicad <major>…` folder, the profile XML files in a `<dir>\Profile\`
-  folder whose `<dir>` holds no `ProfileSet.xml`. The scheme is the `.bin` (searched as today,
+  defaults. Baaz finds the profile by content, without any folder or file name (folder names are
+  localized; final review 2026-11-04): under the running Archicad's
+  `%APPDATA%\GRAPHISOFT\Archicad <major>…` folder, the XML files whose root element is `<Profile>`
+  and that do not lie inside the folder holding `ProfileSet.xml`. The scheme is the `.bin` (searched as today,
   up to three levels deep, recognised by the marker) whose header GUID equals the named GUID.
   **No commands are offered** (third hint) when there is not exactly one such profile file, not
   exactly one command `SchemeRef` in it, no readable `.bin` with that GUID, or that `.bin` fits
@@ -125,13 +135,16 @@ dann eine Mini-Anleitung"). Views, tools and everything else stay searchable as 
 | State | Hint (wording left to the builder, English like the other HUD texts) |
 |---|---|
 | No export found | Commands need one export. Guide: Enter opens Work Environment → export the profile to `…\.baaz\commands` → open the HUD again |
-| Some items have no name (added to the menus after the export) | *N* commands are new. Same guide |
+| Some items cannot be offered: no name (added after the export) or not linked (section 3) | *N* commands cannot be searched yet. Same guide |
 | The active profile or its `.bin` cannot be found or read (unknown format, for example after an Archicad update), or that `.bin` fits no menu | Command list cannot be read for this Archicad version. No commands are offered |
 
-- *(My call)* "*N* commands are new" counts only items that link to a live item, are not a
-  placeholder (dynamic lists, base spec 4.4) and have no name in the export. Right after a fresh
-  export of the current state, *N* is therefore 0; commands of add-ons the export does not
-  contain are removed before linking (section 3) and are not counted.
+- *N* (decided by Dave 2026-11-04, option A of the final review) counts the non-placeholder
+  `Item`s of top-level menus whose title matched the live bar that are either linked but have
+  no name in the export, or not linked at all (count mismatch, an uncertain add-on part,
+  section 3). Placeholders, menus whose title is not in the live bar (for example *Apple*) and
+  items removed by the add-on rule of section 3 are not counted. Right after a fresh export of
+  the current state, *N* is therefore 0 unless a part stays uncertain (a dynamic list next to an
+  add-on command); such items stay counted, because they really are not searchable.
 - *(My call)* The hint row is never the default selection, takes no slot from the result count,
   is reachable with the arrow keys and runs on Enter or click only, not on Space. Typing
   `lineal` and pressing Enter must keep running *Lineal*.
