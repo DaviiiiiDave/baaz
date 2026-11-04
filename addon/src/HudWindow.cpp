@@ -26,7 +26,7 @@ size_t HudWindow::s_selectedIndex = 0;
 SearchItem HudWindow::s_pendingItem;
 // Ready until the first index refresh arrives, so a fresh HUD does not flash a hint
 CommandState HudWindow::s_commandState = CommandState::Ready;
-size_t HudWindow::s_unnamed = 0;
+size_t HudWindow::s_notSearchable = 0;
 SearchItem HudWindow::s_workEnvironment;
 bool HudWindow::s_runRefused = false;
 HintRow HudWindow::s_hint;
@@ -268,12 +268,12 @@ void HudWindow::SetQuery(std::wstring query) {
 }
 
 void HudWindow::RebuildHint() {
-    s_hint = MakeHintRow(s_commandState, s_unnamed, s_workEnvironment.liveId != 0, s_runRefused);
+    s_hint = MakeHintRow(s_commandState, s_notSearchable, s_workEnvironment.liveId != 0, s_runRefused);
 }
 
 void HudWindow::ApplyCommandIndex(const CommandIndex& index) {
     s_commandState = index.state;
-    s_unnamed = index.unnamed;
+    s_notSearchable = index.notSearchable;
     s_workEnvironment = index.workEnvironment;
     RebuildHint();
     if (s_visible) SetQuery(s_query);

@@ -44,7 +44,7 @@ private:
     static size_t s_selectedIndex;
     static SearchItem s_pendingItem;
     static CommandState s_commandState;
-    static size_t s_unnamed;
+    static size_t s_notSearchable;
     static SearchItem s_workEnvironment;
     static bool s_runRefused;
     static HintRow s_hint;

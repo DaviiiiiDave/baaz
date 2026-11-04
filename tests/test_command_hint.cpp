@@ -40,7 +40,7 @@ void TestNoExportHintHasGuide() {
 
 void TestNewCommandsHintCounts() {
     const HintRow row = MakeHintRow(CommandState::NewCommands, 3, true, false);
-    assert(Contains(row.title, L"3"));
+    assert(row.title == L"Commands not searchable yet: 3");
     assert(row.guide == MakeHintRow(CommandState::NoExport, 0, true, false).guide);
     assert(row.canOpenWorkEnvironment);
     assert(Contains(MakeHintRow(CommandState::NewCommands, 17, true, false).title, L"17"));

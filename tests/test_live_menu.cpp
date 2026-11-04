@@ -378,7 +378,7 @@ void TestOffersCommandsWhenCurrent() {
     TestFolders folders;
     folders.WriteCurrent();
     const CommandIndex index = IndexOf(frame.Hwnd());
-    assert(index.state == CommandState::Ready && index.unnamed == 0);
+    assert(index.state == CommandState::Ready && index.notSearchable == 0);
     const std::vector<SearchItem>& items = index.commands;
     assert(items.size() == 2);
     assert(items[0].kind == ItemKind::Command && items[0].title == L"Alpha" && items[0].tag == L"Test");
@@ -481,7 +481,7 @@ void TestUnnamedCommandIsCountedNotOffered() {
     folders.UseScheme();
     folders.WriteExport(0, ExportXml("<Menu ID=\"M\" title=\"&amp;Test\">" + XmlItem(1, "Alpha") + "</Menu>"));   // no name for 2
     const CommandIndex index = IndexOf(frame.Hwnd());
-    assert(index.state == CommandState::NewCommands && index.unnamed == 1);
+    assert(index.state == CommandState::NewCommands && index.notSearchable == 1);
     assert((Titles(index.commands) == std::vector<std::wstring>{ L"Alpha" }));
     std::cout << "[PASS] TestUnnamedCommandIsCountedNotOffered\n";
 }
@@ -494,7 +494,7 @@ void TestPlaceholderIsNeverCounted() {
     folders.WriteExport(0);
     folders.UseScheme();
     const CommandIndex index = IndexOf(frame.Hwnd());
-    assert(index.state == CommandState::Ready && index.unnamed == 0);
+    assert(index.state == CommandState::Ready && index.notSearchable == 0);
     assert(Titles(index.commands) == kAlphaBeta);
     std::cout << "[PASS] TestPlaceholderIsNeverCounted\n";
 }
@@ -576,6 +576,7 @@ void TestUnloadedAddOnNextToPlaceholderLinksNothing() {
     frame.List({ 201, 801, 802, 202, 0, 203 });
     const CommandIndex index = IndexOf(frame.Hwnd());
     assert((Titles(index.commands) == std::vector<std::wstring>{ L"C" }) && (LiveIds(index.commands) == std::vector<unsigned>{ 203 }));
+    assert(index.state == CommandState::NewCommands && index.notSearchable == 3);
     std::cout << "[PASS] TestUnloadedAddOnNextToPlaceholderLinksNothing\n";
 }
 
@@ -590,6 +591,7 @@ void TestAddOnInstalledSinceExportLinksNothing() {
     frame.List({ 209, 201, 801, 202, 0, 203 });
     const CommandIndex index = IndexOf(frame.Hwnd());
     assert((Titles(index.commands) == std::vector<std::wstring>{ L"C" }) && (LiveIds(index.commands) == std::vector<unsigned>{ 203 }));
+    assert(index.state == CommandState::NewCommands && index.notSearchable == 2);   // Y is not counted
     std::cout << "[PASS] TestAddOnInstalledSinceExportLinksNothing\n";
 }
 
@@ -603,7 +605,7 @@ void TestBuiltInPartAroundPlaceholderStillLinks() {
     const CommandIndex index = IndexOf(frame.Hwnd());
     assert((Titles(index.commands) == std::vector<std::wstring>{ L"A", L"B", L"C" }));
     assert((LiveIds(index.commands) == std::vector<unsigned>{ 201, 202, 203 }));
-    assert(index.state == CommandState::Ready && index.unnamed == 0);
+    assert(index.state == CommandState::Ready && index.notSearchable == 0);
     std::cout << "[PASS] TestBuiltInPartAroundPlaceholderStillLinks\n";
 }
 
@@ -619,6 +621,18 @@ void TestNoExportAddOnPartLinksNoWorkEnvironment() {
     assert(index.state == CommandState::NoExport && index.commands.empty());
     assert(index.workEnvironment.liveId == 0);
     std::cout << "[PASS] TestNoExportAddOnPartLinksNoWorkEnvironment\n";
+}
+
+// A part whose item count changed links nothing; its commands are counted, not left out silently
+void TestCountMismatchPartIsCounted() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    folders.WriteCurrent();
+    frame.List({ 255, 0, 300, 402 });
+    const CommandIndex index = IndexOf(frame.Hwnd());
+    assert((Titles(index.commands) == std::vector<std::wstring>{ L"Alpha" }));
+    assert(index.state == CommandState::NewCommands && index.notSearchable == 1);
+    std::cout << "[PASS] TestCountMismatchPartIsCounted\n";
 }
 
 // --- Which scheme file is the active one: only the one the profile in use names ---------------
@@ -765,7 +779,7 @@ void TestNoExportState() {
         folders.WriteBin(TestBin({ Item(1, 0, 0), Separator(), Item(7682, 0, 0) }), 0);
         folders.UseScheme();
         const CommandIndex index = IndexOf(frame.Hwnd());
-        assert(index.state == CommandState::NoExport && index.commands.empty() && index.unnamed == 0);
+        assert(index.state == CommandState::NoExport && index.commands.empty() && index.notSearchable == 0);
         // Work Environment is found from the scheme alone and runs like any command
         assert(index.workEnvironment.kind == ItemKind::Command && index.workEnvironment.liveId == 300);
         assert((index.workEnvironment.menuPosition == std::vector<int>{ 0, 2 }));
@@ -965,6 +979,7 @@ int main() {
     TestAddOnInstalledSinceExportLinksNothing();
     TestBuiltInPartAroundPlaceholderStillLinks();
     TestNoExportAddOnPartLinksNoWorkEnvironment();
+    TestCountMismatchPartIsCounted();
     TestOnlyProfileSchemeIsUsed();
     TestNamedProfilesAreNotTheActiveProfile();
     TestMissingOrAmbiguousProfileOffersNothing();

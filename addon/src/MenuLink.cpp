@@ -77,6 +77,7 @@ struct LinkRun {
     MenuSource& source;
     const std::vector<DynamicList>& lists;
     std::vector<LinkedCommand> commands;
+    size_t namedItems = 0;   // linked Items of the scheme that have a name
 };
 
 } // namespace
@@ -265,6 +266,7 @@ private:
             if (node.type == MenuNodeType::Popup) {
                 MenuLevel(m_run, node.children, Position(pair.live), m_menuPath + kPathSeparator + node.name).Link();
             } else if (!IsPlaceholder(node)) {
+                if (!node.name.empty()) ++m_run.namedItems;
                 LinkedCommand command = MakeCommand(node.name, pair.live);
                 command.commandNumber = node.commandNumber;
                 command.mdid1 = node.mdid1;
@@ -320,31 +322,47 @@ static bool MatchMenus(const std::vector<MenuNode>& bar, const std::vector<std::
     return !matched.empty();
 }
 
+// Items that are not placeholders, at any depth
+static size_t CountItems(const std::vector<MenuNode>& nodes) {
+    size_t count = 0;
+    for (const MenuNode& node : nodes) {
+        if (node.type == MenuNodeType::Popup) count += CountItems(node.children);
+        else if (node.type == MenuNodeType::Item && !IsPlaceholder(node)) ++count;
+    }
+    return count;
+}
+
 // false if the live menu bar has no menu in common with the catalogue, or in another order
 static bool LinkBar(const std::vector<MenuNode>& bar, MenuSource& live, const std::vector<DynamicList>& lists,
-                    std::vector<LinkedCommand>& linked) {
+                    std::vector<LinkedCommand>& linked, size_t& notSearchable) {
     std::vector<MatchedMenu> matched;
     if (!MatchMenus(bar, live.TopLevelTitles(), matched)) return false;
     LinkRun run{ live, lists, {} };
+    size_t items = 0;
     for (const MatchedMenu& menu : matched) {
         MenuLevel(run, bar[menu.catalogue].children, { static_cast<int>(menu.live) }, bar[menu.catalogue].name).Link();
+        items += CountItems(bar[menu.catalogue].children);
     }
     std::sort(run.commands.begin(), run.commands.end(),
               [](const LinkedCommand& a, const LinkedCommand& b) { return a.position < b.position; });
     linked = std::move(run.commands);
+    notSearchable = items - run.namedItems;
     return true;
 }
 
 std::vector<LinkedCommand> MenuLink::Link(const std::vector<MenuNode>& bar, MenuSource& live,
-                                          const std::vector<DynamicList>& lists) {
+                                          const std::vector<DynamicList>& lists, size_t* notSearchable) {
     std::vector<LinkedCommand> linked;
-    LinkBar(bar, live, lists, linked);
+    size_t count = 0;
+    LinkBar(bar, live, lists, linked, count);
+    if (notSearchable != nullptr) *notSearchable = count;
     return linked;
 }
 
 int MenuLink::FitScore(const std::vector<MenuNode>& bar, MenuSource& live) {
     std::vector<LinkedCommand> linked;
-    if (!LinkBar(bar, live, {}, linked)) return -1;
+    size_t notSearchable = 0;
+    if (!LinkBar(bar, live, {}, linked, notSearchable)) return -1;
     return static_cast<int>(linked.size());
 }
 

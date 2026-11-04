@@ -427,7 +427,8 @@ static const LinkedCommand* FindWorkEnvironment(const std::vector<LinkedCommand>
 static CommandIndex Offer(std::vector<MenuNode>& bar, const CommandSource::CachedExport* names, MenuSource& live,
                           const std::vector<DynamicList>& lists, CommandIndex index) {
     if (names != nullptr) AttachNames(bar, names->bar);
-    const std::vector<LinkedCommand> linked = MenuLink::Link(bar, live, lists);
+    size_t notSearchable = 0;
+    const std::vector<LinkedCommand> linked = MenuLink::Link(bar, live, lists, &notSearchable);
     const LinkedCommand* workEnvironment = FindWorkEnvironment(linked);
     if (workEnvironment != nullptr) index.workEnvironment = ToSearchItem(*workEnvironment);
     if (names == nullptr) {
@@ -436,10 +437,10 @@ static CommandIndex Offer(std::vector<MenuNode>& bar, const CommandSource::Cache
     }
     if (linked.empty()) return index;
     for (const LinkedCommand& command : linked) {
-        if (command.name.empty()) ++index.unnamed;
-        else index.commands.push_back(ToSearchItem(command));
+        if (!command.name.empty()) index.commands.push_back(ToSearchItem(command));
     }
-    index.state = index.unnamed > 0 ? CommandState::NewCommands : CommandState::Ready;
+    index.notSearchable = notSearchable;
+    index.state = notSearchable > 0 ? CommandState::NewCommands : CommandState::Ready;
     return index;
 }
 

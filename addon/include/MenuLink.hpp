@@ -51,8 +51,10 @@ public:
     // separators) with a placeholder links nothing if it holds an Item with a non-zero MDID or lost an
     // entry to DropAbsentAddOnItems. Remaining risk: in a part without a placeholder, one add-on item
     // that left since the export and another that came at the same position keep the count equal.
+    // notSearchable, if given: the Items (not placeholders) of the top-level menus whose title matched,
+    // at any depth, that are not linked or are linked without a name
     static std::vector<LinkedCommand> Link(const std::vector<MenuNode>& bar, MenuSource& live,
-                                           const std::vector<DynamicList>& lists);
+                                           const std::vector<DynamicList>& lists, size_t* notSearchable = nullptr);
     // -1 if no top-level menu has a title in common with the live bar, or the common ones are in
     // another order; otherwise the number of linked commands
     static int FitScore(const std::vector<MenuNode>& bar, MenuSource& live);
