@@ -30,9 +30,10 @@ private:
 // What Baaz can say about Archicad's menu commands right now
 enum class CommandState {
     Ready,         // every linked command has a name
-    NoExport,      // the scheme links, but no export that fits gives names: no commands
+    NoExport,      // the scheme of the profile in use is usable, but no export that fits gives names: no commands
     NewCommands,   // some linked commands have no name in the export (added to the menus since)
-    Unreadable     // no scheme file that can be read and fits: no commands
+    Unreadable     // no commands: the profile or its scheme file is missing, ambiguous or not understood,
+                   // or the scheme does not fit the live menu bar (with a fitting export: or links nothing)
 };
 
 struct CommandIndex {
@@ -47,10 +48,11 @@ struct CommandIndex {
 class CommandSource {
 public:
     // Re-reads the scheme files, the profile that names the scheme in use and the exports only when
-    // their path, write time or size changed. Takes the exported names from the newest export whose
-    // top-level menus fit the live menu bar, and the structure from the scheme file with the best fit
-    // (the one the profile names, if it fits), or else the newest of the best-fitting files. Commands
-    // of add-ons that the export does not list are left out of the structure first.
+    // their path, write time or size changed. The structure comes only from the scheme file whose GUID
+    // the profile in use names; if there is not exactly one such readable file, or it fits no top-level
+    // menu of the live menu bar, nothing is offered (never another scheme file). The names come from the
+    // newest export whose top-level menus fit the live menu bar; commands of add-ons that this export
+    // does not list are left out of the structure first.
     static CommandIndex BuildCommandIndex(HWND frame, const std::vector<DynamicList>& lists);
     // Fills the item's menu path again and posts WM_COMMAND only if the live item is still an
     // enabled item with the same id.

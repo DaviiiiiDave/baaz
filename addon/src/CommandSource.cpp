@@ -376,17 +376,6 @@ bool CommandSource::LoadSchemes(const Locations& where, std::vector<CachedScheme
 
 // --- Choosing --------------------------------------------------------------------------------
 
-namespace {
-
-// A readable scheme file as it would be linked: without the add-ons the export does not list
-struct Candidate {
-    const CommandSource::CachedScheme* file = nullptr;
-    std::vector<MenuNode> bar;
-    int fit = -1;
-};
-
-} // namespace
-
 // The newest of the exports whose top-level menus fit the live menu bar; none if none does
 static const CommandSource::CachedExport* NewestFittingExport(const std::vector<CommandSource::CachedExport>& exports,
                                                               MenuSource& live) {
@@ -398,60 +387,19 @@ static const CommandSource::CachedExport* NewestFittingExport(const std::vector<
     return newest;
 }
 
-static std::vector<Candidate> Evaluate(const std::vector<CommandSource::CachedScheme>& schemes,
-                                       const CommandSource::CachedExport* names, MenuSource& live) {
-    std::vector<Candidate> candidates;
+// The one readable scheme file whose header GUID is the one the profile names. No other file is a
+// candidate: a scheme that is not in use would link names to the wrong commands.
+static const CommandSource::CachedScheme* ActiveScheme(const std::vector<CommandSource::CachedScheme>& schemes,
+                                                       const std::string& activeGuid) {
+    if (activeGuid.empty()) return nullptr;
+    const CommandSource::CachedScheme* found = nullptr;
     for (const CommandSource::CachedScheme& scheme : schemes) {
-        if (!scheme.readable) continue;
-        Candidate candidate;
-        candidate.file = &scheme;
-        candidate.bar = scheme.scheme.floorPlanBar;
-        if (names != nullptr) DropAbsentAddOnItems(candidate.bar, names->bar);
-        candidate.fit = MenuLink::FitScore(candidate.bar, live);
-        candidates.push_back(std::move(candidate));
+        if (!scheme.readable || _stricmp(scheme.scheme.guid.c_str(), activeGuid.c_str()) != 0) continue;
+        // The same scheme twice: which copy is current?
+        if (found != nullptr) return nullptr;
+        found = &scheme;
     }
-    return candidates;
-}
-
-// >0 if a is the better candidate: the higher fit, then the newer file
-static int Compare(const Candidate& a, const Candidate& b) {
-    if (a.fit != b.fit) return a.fit > b.fit ? 1 : -1;
-    return CompareFileTime(&a.file->time, &b.file->time);
-}
-
-// The best candidate; none if the two best fit equally well and were written at the same time
-static Candidate* Best(const std::vector<Candidate*>& pool) {
-    Candidate* best = nullptr;
-    bool tie = false;
-    for (Candidate* candidate : pool) {
-        const int order = best == nullptr ? 1 : Compare(*candidate, *best);
-        if (order > 0) {
-            best = candidate;
-            tie = false;
-        } else if (order == 0) {
-            tie = true;
-        }
-    }
-    return tie ? nullptr : best;
-}
-
-// The candidates that fit; among them those of the scheme the profile names, if there are any
-static Candidate* ChooseScheme(std::vector<Candidate>& candidates, const std::string& activeGuid) {
-    std::vector<Candidate*> fitting;
-    std::vector<Candidate*> inUse;
-    for (Candidate& candidate : candidates) {
-        if (candidate.fit < 0) continue;
-        fitting.push_back(&candidate);
-        if (_stricmp(candidate.file->scheme.guid.c_str(), activeGuid.c_str()) == 0) inUse.push_back(&candidate);
-    }
-    return Best(inUse.empty() ? fitting : inUse);
-}
-
-// A newer file that the reader does not understand (Archicad changed the format) may be the scheme in use
-static bool UnreadableIsNewer(const std::vector<CommandSource::CachedScheme>& schemes, const FILETIME& chosen) {
-    return std::any_of(schemes.begin(), schemes.end(), [&chosen](const CommandSource::CachedScheme& scheme) {
-        return !scheme.readable && CompareFileTime(&scheme.time, &chosen) >= 0;
-    });
+    return found;
 }
 
 // --- CommandSource -------------------------------------------------------------------------
@@ -474,18 +422,19 @@ static const LinkedCommand* FindWorkEnvironment(const std::vector<LinkedCommand>
     return nullptr;
 }
 
-// Names the chosen structure from the export and links it; Unreadable if nothing links
+// Names the structure from the export and links it. Without a fitting export that is all there is
+// to say, even when nothing links; with one, nothing linking means the scheme does not describe the live menu.
 static CommandIndex Offer(std::vector<MenuNode>& bar, const CommandSource::CachedExport* names, MenuSource& live,
                           const std::vector<DynamicList>& lists, CommandIndex index) {
     if (names != nullptr) AttachNames(bar, names->bar);
     const std::vector<LinkedCommand> linked = MenuLink::Link(bar, live, lists);
-    if (linked.empty()) return index;
     const LinkedCommand* workEnvironment = FindWorkEnvironment(linked);
     if (workEnvironment != nullptr) index.workEnvironment = ToSearchItem(*workEnvironment);
     if (names == nullptr) {
         index.state = CommandState::NoExport;
         return index;
     }
+    if (linked.empty()) return index;
     for (const LinkedCommand& command : linked) {
         if (command.name.empty()) ++index.unnamed;
         else index.commands.push_back(ToSearchItem(command));
@@ -502,13 +451,15 @@ CommandIndex CommandSource::BuildCommandIndex(HWND frame, const std::vector<Dyna
     std::vector<CachedScheme> schemes;
     std::string activeGuid;
     if (!LoadSchemes(where, schemes, activeGuid)) return index;
+    const CachedScheme* scheme = ActiveScheme(schemes, activeGuid);
+    if (scheme == nullptr) return index;
     const std::vector<CachedExport> exports = LoadExports(where.commands);
     LiveMenu live(frame);
     const CachedExport* names = NewestFittingExport(exports, live);
-    std::vector<Candidate> candidates = Evaluate(schemes, names, live);
-    Candidate* chosen = ChooseScheme(candidates, activeGuid);
-    if (chosen == nullptr || UnreadableIsNewer(schemes, chosen->file->time)) return index;
-    return Offer(chosen->bar, names, live, lists, std::move(index));
+    std::vector<MenuNode> bar = scheme->scheme.floorPlanBar;
+    if (names != nullptr) DropAbsentAddOnItems(bar, names->bar);
+    if (MenuLink::FitScore(bar, live) < 0) return index;
+    return Offer(bar, names, live, lists, std::move(index));
 }
 
 static bool HasRunnableShape(const SearchItem& item) {
