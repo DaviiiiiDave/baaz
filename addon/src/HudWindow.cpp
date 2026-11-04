@@ -313,6 +313,8 @@ void HudWindow::ExecuteSelection() {
 }
 
 void HudWindow::ClickAt(float y) {
+    // What a hidden HUD last offered may no longer be what the user sees
+    if (!s_visible) return;
     const float searchH = kSearchH * s_scale;
     const float hintH = HintBlockHeight(s_hint) * s_scale;
     if (y < searchH) return;

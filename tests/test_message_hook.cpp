@@ -10,6 +10,7 @@
 #include "BaazAddon.hpp"
 #include <windows.h>
 #include <iostream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -416,17 +417,49 @@ static void SpaceNeverRunsHint(bool peek) {
     CHECK(g_commands.empty());
 }
 
+static BOOL CALLBACK FindHudOfThread(HWND window, LPARAM found) {
+    wchar_t name[64] = {};
+    if (GetClassNameW(window, name, static_cast<int>(std::size(name))) == 0 || wcscmp(name, L"BaazHUDWindowClass") != 0) return TRUE;
+    *reinterpret_cast<HWND*>(found) = window;
+    return FALSE;
+}
+
+// The HUD of this test only: an Archicad running Baaz on the same desktop has a window of the same class
+static HWND OwnHudWindow() {
+    HWND found = NULL;
+    EnumThreadWindows(GetCurrentThreadId(), FindHudOfThread, reinterpret_cast<LPARAM>(&found));
+    return found;
+}
+
+// 34 is the height of the search field in 96-DPI pixels; a few pixels below it is the hint row
+static void ClickHintRow() {
+    const float scale = GetDpiForWindow(g_main) / 96.0f;
+    const int y = static_cast<int>((34.0f + 5.0f) * scale);
+    HWND hud = OwnHudWindow();
+    CHECK(hud != NULL);
+    if (hud != NULL) SendMessageW(hud, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(100, y));
+}
+
 static void ClickOnHintOpensWorkEnvironment(bool peek) {
     OpenHud(peek);
     WorkEnvironmentMenu menu;
     HudWindow::ApplyCommandIndex(NoExportIndex());
-    // 34 is the height of the search field in 96-DPI pixels; a few pixels below it is the hint row
-    const float scale = GetDpiForWindow(g_main) / 96.0f;
-    const int y = static_cast<int>((34.0f + 5.0f) * scale);
-    SendMessageW(FindWindowW(L"BaazHUDWindowClass", NULL), WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(100, y));
+    ClickHintRow();
     Pump(peek);
     CHECK(!HudWindow::IsVisible());
     CHECK((g_commands == std::vector<unsigned>{ kWorkEnvironmentId }));
+}
+
+// A click that reaches the hidden window must not run what the HUD offered when it was last open
+static void ClickOnHiddenHudRunsNothing(bool peek) {
+    OpenHud(peek);
+    WorkEnvironmentMenu menu;
+    HudWindow::ApplyCommandIndex(NoExportIndex());
+    HudWindow::Hide();
+    ClickHintRow();
+    Pump(peek);
+    CHECK(!HudWindow::IsVisible());
+    CHECK(g_commands.empty());
 }
 
 static bool HintMentionsRefusedRun() {
@@ -506,6 +539,7 @@ int main() {
         Run("Enter on the hint opens Work Environment", EnterOnHintOpensWorkEnvironment, peek);
         Run("Space never runs the hint", SpaceNeverRunsHint, peek);
         Run("Click on the hint opens Work Environment", ClickOnHintOpensWorkEnvironment, peek);
+        Run("A click on the hidden HUD runs nothing", ClickOnHiddenHudRunsNothing, peek);
         Run("A refused run is shown once", RefusedRunIsShownOnce, peek);
         Run("Switching apps closes HUD", SwitchingAppsClosesHud, peek);
         Run("Switching apps during hold sends nothing", SwitchingAppsDuringHoldSendsNothing, peek);
