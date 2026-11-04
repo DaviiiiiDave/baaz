@@ -68,6 +68,14 @@ static bool SetLayerCombo(const SearchItem&) { return true; }
 
 #endif
 
+bool CommandExecutor::s_refusedRun = false;
+
+bool CommandExecutor::TakeRefusedRun() {
+    const bool refused = s_refusedRun;
+    s_refusedRun = false;
+    return refused;
+}
+
 bool CommandExecutor::Execute(const SearchItem& item) {
     switch (item.kind) {
     case ItemKind::Tool:       return SetTool(item);
@@ -78,7 +86,8 @@ bool CommandExecutor::Execute(const SearchItem& item) {
         SettingsDialog::Show(MainWindow());
         return true;
     case ItemKind::Command:
-        return CommandSource::Run(item, MainWindow());
+        s_refusedRun = !CommandSource::Run(item, MainWindow());
+        return !s_refusedRun;
     case ItemKind::Help:
         return true;
     }
