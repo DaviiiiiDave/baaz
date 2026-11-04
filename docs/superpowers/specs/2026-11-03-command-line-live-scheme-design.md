@@ -81,18 +81,23 @@ current, and takes only the item **names** from an export.
   installed after the export is removed as well; if Archicad shows its commands, positions in
   that top-level menu no longer fit, so that menu is not linked until the next export (nothing
   wrong is run), and those commands are not counted as new.
-- **Which `.bin` is the active scheme** *(my call)*: every `.bin` under the running Archicad's
-  `%APPDATA%\GRAPHISOFT\Archicad <major>…` folder (up to three levels deep, recognised by the
-  scheme marker in its first 512 bytes, as today) is a candidate. Baaz links each candidate
-  against the live menu bar and uses the one with the highest fit score; on a tie, the most
-  recently written one. Reason: at OK Archicad rewrites only the active profile's files
-  (measured, section 2.1), so the newest is the one in use, and the fit score keeps a foreign
-  scheme out. If tied candidates also have the same write time, no commands are offered (A1).
-  The profile files (`Arbeitsumgebung\Profile\*.xml`, XML) name the scheme GUID of their command
-  scheme; the user's profile names `2F4881B8-…`. If the builder can establish which profile is
-  active, that GUID is the stronger signal and the fit score becomes the check (section 8). A transient
-  `Zuletzt verw. Arbeitsumgebung\Befehle\Befehle.bin` appeared during a menu change and was gone
-  after it was undone; the builder must check what it stands for (section 8).
+- **Which `.bin` is the active scheme: only the one the active profile names** (decided by
+  Dave 2026-11-04, option A; replaces an earlier choice by fit score and write time, whose
+  fallbacks could pick an inactive scheme such as the standard one and link wrong names).
+  Established in Task 3a: the work environment in effect is a folder next to the one that holds
+  `ProfileSet.xml` (German: `Zuletzt verw. Arbeitsumgebung` next to `Arbeitsumgebung`; seen in
+  Archicad 27, 29 and 30). Its `Profile\` folder holds one profile XML whose `SchemeRef` with
+  `componentType="6FCD168F-A26C-4547-AF9D-ED9A5FC54DD7"` names the active command scheme GUID.
+  A command scheme the user changed without saving it as a named scheme is stored in that same
+  folder (`Befehle\Befehle.bin`, unnamed) and is then the one named. `ProfileSet.xml` holds only
+  defaults. Baaz finds the profile without localized folder names: under the running Archicad's
+  `%APPDATA%\GRAPHISOFT\Archicad <major>…` folder, the profile XML files in a `<dir>\Profile\`
+  folder whose `<dir>` holds no `ProfileSet.xml`. The scheme is the `.bin` (searched as today,
+  up to three levels deep, recognised by the marker) whose header GUID equals the named GUID.
+  **No commands are offered** (third hint) when there is not exactly one such profile file, not
+  exactly one command `SchemeRef` in it, no readable `.bin` with that GUID, or that `.bin` fits
+  no top-level menu of the live bar or links no command. There is no fallback to other `.bin`
+  files.
 - **No staleness rule.** The structure is always the current one, so a menu change no longer
   needs a new export. The base spec's run-time protection stays: before running, Baaz fills the
   live path again and requires an enabled `Item` with the same live id (base spec 4.3).
@@ -121,7 +126,7 @@ dann eine Mini-Anleitung"). Views, tools and everything else stay searchable as 
 |---|---|
 | No export found | Commands need one export. Guide: Enter opens Work Environment → export the profile to `…\.baaz\commands` → open the HUD again |
 | Some items have no name (added to the menus after the export) | *N* commands are new. Same guide |
-| `.bin` cannot be read (unknown format, for example after an Archicad update) or no candidate fits | Command list cannot be read for this Archicad version. No commands are offered |
+| The active profile or its `.bin` cannot be found or read (unknown format, for example after an Archicad update), or that `.bin` fits no menu | Command list cannot be read for this Archicad version. No commands are offered |
 
 - *(My call)* "*N* commands are new" counts only items that link to a live item, are not a
   placeholder (dynamic lists, base spec 4.4) and have no name in the export. Right after a fresh
@@ -176,11 +181,9 @@ dann eine Mini-Anleitung"). Views, tools and everything else stay searchable as 
   a `.bin` and the XML export of the **same state** (no OK between them) and require the two trees
   to be identical (ids, order, separators, popups, titles); keep that as the local test of
   section 9.
-- What `Zuletzt verw. Arbeitsumgebung\Befehle\Befehle.bin` represents and whether it must win
-  over the profile's scheme while it exists.
-- Which profile is active (candidates: `Arbeitsumgebung\ProfileSet.xml`,
-  `Zuletzt verw. Arbeitsumgebung\Profile\Profile.xml`), so that the profile's scheme GUID can
-  pick the `.bin` (section 3). Without a reliable answer, fit score and write time decide.
+- *(Resolved in Task 3a, see section 3:)* what `Zuletzt verw. Arbeitsumgebung\Befehle\Befehle.bin`
+  represents (an unsaved command scheme of the profile in effect) and which profile is active
+  (the one in that folder, not `ProfileSet.xml`).
 - Whether the live menu changes at the same moment as the `.bin` (at OK). If not, the window in
   between is covered by the fit score and the run-time re-check, and must be described.
 - How the existing Task 3 code is reused: `LiveMenu`, `Run`, title matching (D5) and the export
@@ -193,8 +196,9 @@ dann eine Mini-Anleitung"). Views, tools and everything else stay searchable as 
   truncated file, unknown record, wrong header, oversize file each give "unreadable"; names
   attached by full id (same number, different MDID); unnamed item keeps positions and is not
   offered; items of add-ons absent from the export are removed, popups emptied by that are
-  removed, built-in items and already-empty popups stay; newest fitting export wins; candidate choice by fit score then write time; each of
-  the three hint states.
+  removed, built-in items and already-empty popups stay; newest fitting export wins; only the
+  `.bin` the active profile names is used (missing, ambiguous or unreadable profile or `.bin`,
+  or no fit → no commands, never another `.bin`); each of the three hint states.
 - Local, skipped when the files are missing: the real AC29 and AC30 `.bin` give the same tree as
   the XML export of the same state. Needs one AC30 profile export taken without pressing OK
   afterwards (close the dialog with Cancel); open with Dave.

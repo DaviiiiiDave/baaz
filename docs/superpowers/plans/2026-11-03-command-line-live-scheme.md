@@ -10,7 +10,7 @@ stages:
 
 **Goal:** Menu commands keep working after the user changes Archicad's menus, without a new export; every state without commands is explained in the HUD with a short guide.
 
-**Architecture:** A strict hand-written reader turns the active command-scheme `.bin` into the same `MenuNode` tree the XML reader produces, without item names. Names are attached by full command id from the newest fitting export. `CommandSource` picks the `.bin` by fit score, drops the time-based staleness check and reports a state that the HUD shows as one pinned hint row.
+**Architecture:** A strict hand-written reader turns the active command-scheme `.bin` into the same `MenuNode` tree the XML reader produces, without item names. Names are attached by full command id from the newest fitting export. `CommandSource` uses only the `.bin` the active profile names (addendum 3, option A of 2026-11-04), drops the time-based staleness check and reports a state that the HUD shows as one pinned hint row.
 
 **Tech Stack:** C++20, Win32, CMake + Ninja Multi-Config, native assert-style tests (as the base plan).
 
@@ -32,7 +32,7 @@ stages:
 1. **`.bin` written by a newer Archicad with a changed layout** → nothing offered, the "cannot be read" hint, no crash. Tests: Task 3a `TestUnknownHeaderIsUnreadable`, `TestUnknownRecordIsUnreadable`, `TestTruncatedIsUnreadable`.
 2. **A command moved to another menu without exporting** → offered and run at its new place. Test: Task 3b `TestMovedCommandKeepsItsName`.
 3. **A command added to a menu after the export** → not offered, counted, "N commands are new" hint. Test: Task 3b `TestUnnamedCommandIsCountedNotOffered`.
-4. **Two scheme files fit equally and were written at the same time** → no commands (A1). Test: Task 3b `TestTiedSchemesWithSameTimeOfferNothing`.
+4. **The scheme the active profile names is missing or unreadable while other `.bin` files are readable** (for example the standard scheme) → no commands, never another `.bin` (A1). Test: Task 3b `TestProfileSchemeUnreadableOffersNothing`.
 5. **Typing `lineal` and pressing Enter while a hint is shown** → runs *Lineal*, not the hint. Test: Task 3c `TestHintIsNeverDefaultSelection`.
 6. **An add-on menu whose commands are configured but not loaded** (CI Tools: 15 submenus in the `.bin`, 2 live) → removed before linking, the rest of the menu links. Test: Task 3b `TestAbsentAddOnItemsAreDropped`.
 
@@ -117,15 +117,17 @@ stages:
   void TestPlaceholderIsNeverCounted();           // 23040 / 9472 without names -> unnamed == 0
   void TestNewestFittingExportGivesNames();       // two fitting exports (sub-folders) -> names of the newer; a non-fitting newer one is ignored
   void TestExportFoundBySchemeMarker();           // export in "<any>\Befehle\x.xml" found; an XML without the marker ignored
-  void TestSchemeChosenByFitThenTime();           // higher fit wins; equal fit -> newer write time wins
-  void TestTiedSchemesWithSameTimeOfferNothing(); // equal fit and equal time -> commands empty, state Unreadable
+  void TestOnlyProfileSchemeIsUsed();             // profile names an older .bin, a newer readable .bin exists -> the named one is used
+  void TestMissingOrAmbiguousProfileOffersNothing(); // no profile file, two profile files, or no / two command SchemeRefs -> commands empty, state Unreadable
+  void TestProfileSchemeUnreadableOffersNothing(); // named .bin missing or unreadable, standard .bin readable -> commands empty, state Unreadable
+  void TestProfileSchemeNotFittingOffersNothing(); // named .bin fits no top-level menu, or links no command -> commands empty, state Unreadable
   void TestNoExportState();                       // .bin present, no export -> state NoExport, commands empty, workEnvironment found
   void TestUnreadableBinState();                  // only an unreadable .bin -> state Unreadable
   void TestMenuChangeWithoutExportStillOffers();  // replaces the old stale-export tests: newer .bin than export -> commands offered
   ```
   Delete the tests of the removed staleness check (`TestStaleExport`, `TestStatusLineWhenStale`, the "cannot check" tests) and say in the commit message why.
 - [ ] **Step 2: Run to see them fail.** `ctest --test-dir build -C Release -R "CommandLine|LiveMenu" --output-on-failure`.
-- [ ] **Step 3: Implement.** Candidates: every marker `.bin` found as today under `%APPDATA%\GRAPHISOFT\Archicad <major>…` (≤ 3 levels), read with `BinSchemeReader`, cached by path + write time + size. Exports: recursive under `.baaz\commands`, by marker, cached the same way. Choice and states exactly as addendum 3-5. Order: choose the newest fitting export (top-level titles, D5; independent of the `.bin`) → for each `.bin` candidate run `DropAbsentAddOnItems` against that export's floor-plan bar → fit score and choice → `AttachNames` → link. Without an export there is nothing to filter (state NoExport). Only if Task 3a's report established the active profile reliably: its scheme GUID picks the `.bin` and the fit score must still be ≥ 0; otherwise fit score, then write time. Remove `CheckFreshness`, `Freshness`, `kCannotCheck`, `s_checkNoted`, `IsExportStale`. Placeholder table by full id: set the MDID parts of 1027, 1293, 20754 from the standard export so that only the dynamic variant stays a placeholder; record in the report which static commands become offerable. `CommandExecutor` and `HudWindow` adapt to `CommandIndex` (HUD shows nothing new yet; Task 3c).
+- [ ] **Step 3: Implement.** Candidates: every marker `.bin` found as today under `%APPDATA%\GRAPHISOFT\Archicad <major>…` (≤ 3 levels), read with `BinSchemeReader`, cached by path + write time + size. Exports: recursive under `.baaz\commands`, by marker, cached the same way. Choice and states exactly as addendum 3-5. Order: find the active profile and its command scheme GUID → the readable `.bin` with that GUID (nothing else is a candidate) → choose the newest fitting export (top-level titles, D5; independent of the `.bin`) → `DropAbsentAddOnItems` against that export's floor-plan bar → fit check (fits no top-level menu or links no command → Unreadable) → `AttachNames` → link. Without a fitting export the state is NoExport, even when nothing links (nothing to filter; `workEnvironment` still found from the `.bin`). Remove `CheckFreshness`, `Freshness`, `kCannotCheck`, `s_checkNoted`, `IsExportStale`. Placeholder table by full id: set the MDID parts of 1027, 1293, 20754 from the standard export so that only the dynamic variant stays a placeholder; record in the report which static commands become offerable. `CommandExecutor` and `HudWindow` adapt to `CommandIndex` (HUD shows nothing new yet; Task 3c).
 - [ ] **Step 4: Run the five checks.**
 - [ ] **Step 5: Commit.** `feat(command-line): take the menu structure from the live scheme`
 
