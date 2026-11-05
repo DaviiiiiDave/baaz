@@ -17,7 +17,10 @@ set(ARCHICAD_DEVKIT_DIR "$ENV{ARCHICAD_DEVKIT_DIR}" CACHE PATH "Archicad 30 DevK
 
 # Sources that build both inside Archicad and, without the API, in the tests
 set(BAAZ_SHARED_SOURCES
+    ${CMAKE_SOURCE_DIR}/addon/src/BinSchemeReader.cpp
     ${CMAKE_SOURCE_DIR}/addon/src/CommandExecutor.cpp
+    ${CMAKE_SOURCE_DIR}/addon/src/CommandHint.cpp
+    ${CMAKE_SOURCE_DIR}/addon/src/CommandSource.cpp
     ${CMAKE_SOURCE_DIR}/addon/src/HudWindow.cpp
     ${CMAKE_SOURCE_DIR}/addon/src/MenuLink.cpp
     ${CMAKE_SOURCE_DIR}/addon/src/MessageHook.cpp

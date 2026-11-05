@@ -278,19 +278,40 @@ void TestNodeBudgetStopsExpansion() {
     assert(SchemeReader::ReadFloorPlanMenuBar(
         Scheme(definitions + BarWithGuid(kFloorPlanGuid, "<Menu IDREF=\"M0\"/>"))).empty());
 
-    // kMaxMenuNodes is 100000 in SchemeReader.cpp and counts the menu itself
+    // kMaxMenuNodes is 100000 in SchemeReader.hpp and counts the menu itself
     assert(SchemeReader::ReadFloorPlanMenuBar(MenuWithSeparators(99999)).size() == 1);
     assert(SchemeReader::ReadFloorPlanMenuBar(MenuWithSeparators(100000)).empty());
     std::cout << "[PASS] TestNodeBudgetStopsExpansion\n";
 }
 
 void TestInputSizeLimit() {
-    // kMaxInputBytes is 8 MiB in SchemeReader.cpp; trailing white space is ignored by the reader
+    // kMaxInputBytes is 8 MiB in SchemeReader.hpp; trailing white space is ignored by the reader
     std::string document = FloorPlanBar("<Menu ID=\"M\" title=\"M\"/>");
     const size_t limit = 8u * 1024u * 1024u;
     assert(SchemeReader::ReadFloorPlanMenuBar(document + std::string(limit - document.size(), ' ')).size() == 1);
     assert(SchemeReader::ReadFloorPlanMenuBar(document + std::string(limit - document.size() + 1, ' ')).empty());
     std::cout << "[PASS] TestInputSizeLimit\n";
+}
+
+void TestSchemeReaderKeepsMdidParts() {
+    auto menus = SchemeReader::ReadFloorPlanMenuBar(FloorPlanBar(
+        "<Menu ID=\"M\" title=\"M\">"
+        "<Item command=\"2129920001-0x47732f64-0x38c147a6\" comment=\"a\"/>"
+        "<Item command=\"5-0x0-0xFFFFFFFF\" comment=\"b\"/>"
+        "<Item command=\"6-0x00000000001-0x2\" comment=\"c\"/>"
+        "</Menu>"));
+    assert(menus.size() == 1 && menus[0].children.size() == 3);
+    const MenuNode& first = menus[0].children[0];
+    assert(first.commandNumber == 2129920001u && first.mdid1 == 0x47732f64u && first.mdid2 == 0x38c147a6u);
+    assert(menus[0].children[1].mdid1 == 0u && menus[0].children[1].mdid2 == 0xFFFFFFFFu);
+    assert(menus[0].children[2].mdid1 == 1u && menus[0].children[2].mdid2 == 2u);
+    // A part that does not fit 32 bits makes the whole scheme unreadable
+    const char* const tooBig[] = { "1-0x100000000-0x0", "1-0x0-0x100000000", "1-0x0-0x1ffffffff" };
+    for (const char* command : tooBig) {
+        std::string item = std::string("<Menu ID=\"M\" title=\"M\"><Item command=\"") + command + "\" comment=\"a\"/></Menu>";
+        assert(SchemeReader::ReadFloorPlanMenuBar(FloorPlanBar(item)).empty());
+    }
+    std::cout << "[PASS] TestSchemeReaderKeepsMdidParts\n";
 }
 
 void TestExactTreeShape() {
@@ -728,6 +749,46 @@ void TestListNeedsOnlyItems() {
     std::cout << "[PASS] TestListNeedsOnlyItems\n";
 }
 
+// PINNED ACCEPTED RISK: this documents today's behaviour, it does not endorse it. Around a placeholder
+// region whole parts are anchored by position, so a new live part the scheme does not hold (Y1, Y2 after
+// the last separator) takes the place of the last scheme part (E, F), whose real entries sit in front of
+// it. Not observed in Archicad; see MenuLink.hpp.
+void TestNewLivePartTakesPlaceOfLastSchemePart() {
+    const std::vector<MenuNode> menu = { ItemNode(L"S0", 11), SeparatorNode(), ItemNode(L"P", kGraphicOverridePlaceholder),
+                                         SeparatorNode(), ItemNode(L"E", 12), ItemNode(L"F", 13) };
+    // Live: S0 | the list | the real E and F | the new part Y1, Y2
+    auto commands = LinkOne(menu, { 1, S, 10, 11, S, 2, 3, S, 20, 21 });
+    assert((LinkedNames(commands) == std::vector<std::wstring>{ L"S0", L"E", L"F" }));
+    assert((LinkedIds(commands) == std::vector<unsigned>{ 1, 20, 21 }));   // E and F run Y1 and Y2
+    std::cout << "[PASS] TestNewLivePartTakesPlaceOfLastSchemePart\n";
+}
+
+// PINNED ACCEPTED RISK: this documents today's behaviour, it does not endorse it. If Archicad hides the
+// static part B next to the region of placeholders while the list holds exactly as many entries as B,
+// the live menu [A | e] looks like [A | B] with an empty list, and B links to the list entry e. Not
+// observed in Archicad; the run-time re-check cannot catch it; see MenuLink.hpp.
+void TestHiddenStaticPartNextToPlaceholderRegionLinksToTheList() {
+    auto commands = LinkOne(ListMenu(), { 1, S, 10 });
+    assert((LinkedNames(commands) == std::vector<std::wstring>{ L"A", L"B" }));
+    assert((LinkedIds(commands) == std::vector<unsigned>{ 1, 10 }));   // B runs e
+    std::cout << "[PASS] TestHiddenStaticPartNextToPlaceholderRegionLinksToTheList\n";
+}
+
+// N counts the linked Items without a name and nothing else: an unnamed Item in a part that does not link
+// is not counted, since a new export cannot link it
+void TestOnlyLinkedUnnamedItemsAreCounted() {
+    std::vector<MenuNode> bar = OneMenu({ ItemNode(L"A", 11), ItemNode(L"", 12), SeparatorNode(), ItemNode(L"", 13), ItemNode(L"", 14) });
+    FakeMenu live = OneLive({ 1, 2, S, 3 });   // the second part has one entry too few
+    size_t notSearchable = 99;
+    const auto commands = MenuLink::Link(bar, live, {}, &notSearchable);
+    assert((LinkedIds(commands) == std::vector<unsigned>{ 1, 2 }));
+    assert(notSearchable == 1);
+    FakeMenu matching = OneLive({ 1, 2, S, 3, 4 });
+    MenuLink::Link(bar, matching, {}, &notSearchable);
+    assert(notSearchable == 3);
+    std::cout << "[PASS] TestOnlyLinkedUnnamedItemsAreCounted\n";
+}
+
 void TestFitScoreRejectsOtherLanguage() {
     auto bar = SchemeReader::ReadFloorPlanMenuBar(ReadFixture());
     FakeMenu live({ L"View", L"Document" });
@@ -748,24 +809,111 @@ void TestFitScoreCountsLinks() {
     std::cout << "[PASS] TestFitScoreCountsLinks\n";
 }
 
-void TestTopLevelTitlesMustMatchExactly() {
+void TestTopLevelFitRules() {
     auto bar = AnsichtBar();
     FakeMenu none({});
     assert(MenuLink::FitScore(bar, none) == -1 && MenuLink::Link(bar, none, {}).empty());
 
+    // Top-level menus are matched by title, so a missing or an extra live menu no longer rejects the
+    // bar: the menus that are in both are linked, the others are ignored
     FakeMenu fewer({ L"Ablage" });
     fewer.Set({ 0 }, { 77 });
-    assert(MenuLink::FitScore(bar, fewer) == -1 && MenuLink::Link(bar, fewer, {}).empty());
+    assert(MenuLink::FitScore(bar, fewer) == 1);
+    assert((LinkedNames(MenuLink::Link(bar, fewer, {})) == std::vector<std::wstring>{ L"Neu" }));
 
     FakeMenu more({ L"Ablage", L"Ansicht", L"Extras" });
     more.Set({ 0 }, { 77 });
     more.Set({ kAnsichtIndex }, kMeasuredAnsicht);
-    assert(MenuLink::FitScore(bar, more) == -1 && MenuLink::Link(bar, more, {}).empty());
+    more.Set({ 2 }, { 88 });
+    auto withExtra = MenuLink::Link(bar, more, {});
+    assert(MenuLink::FitScore(bar, more) == static_cast<int>(withExtra.size()));
+    assert(FindCommand(withExtra, L"Neu") != nullptr && FindCommand(withExtra, L"Lineal") != nullptr);
+    assert(!HasLiveId(withExtra, 88));
 
+    // The matched menus must keep their order
     FakeMenu reordered({ L"Ansicht", L"Ablage" });
     reordered.Set({ 0 }, kMeasuredAnsicht);
     assert(MenuLink::FitScore(bar, reordered) == -1 && MenuLink::Link(bar, reordered, {}).empty());
-    std::cout << "[PASS] TestTopLevelTitlesMustMatchExactly\n";
+    std::cout << "[PASS] TestTopLevelFitRules\n";
+}
+
+static MenuNode OneItemMenu(const wchar_t* title, const wchar_t* item, unsigned number) {
+    return PopupNode(title, { ItemNode(item, number) });
+}
+
+// The pattern of a real Archicad bar, reduced: menus the export has and the live bar lacks (Apple,
+// ArchiCARD), menus only the live bar has (Teamwork), empty slots, and shifted positions
+void TestTopLevelMenusMatchedByTitle() {
+    std::vector<MenuNode> bar = { OneItemMenu(L"Apple", L"Apple item", 101), OneItemMenu(L"A", L"A item", 102),
+                                  OneItemMenu(L"B", L"B item", 103), OneItemMenu(L"ArchiCARD", L"Card item", 104),
+                                  OneItemMenu(L"Tapir", L"Tapir item", 105) };
+    FakeMenu live({ L"", L"A", L"B", L"Teamwork", L"Tapir", L"", L"" });
+    live.Set({ 0 }, { 90 });
+    live.Set({ 1 }, { 5 });
+    live.Set({ 2 }, { 6 });
+    live.Set({ 3 }, { 91 });
+    live.Set({ 4 }, { 7 });
+    auto commands = MenuLink::Link(bar, live, {});
+    assert((LinkedNames(commands) == std::vector<std::wstring>{ L"A item", L"B item", L"Tapir item" }));
+    assert((LinkedIds(commands) == std::vector<unsigned>{ 5, 6, 7 }));
+    assert((commands[0].position == std::vector<int>{ 1, 0 }));
+    assert((commands[1].position == std::vector<int>{ 2, 0 }));
+    assert((commands[2].position == std::vector<int>{ 4, 0 }));
+    assert(commands[0].menuPath == L"A" && commands[2].menuPath == L"Tapir");
+    assert(MenuLink::FitScore(bar, live) == 3);
+    std::cout << "[PASS] TestTopLevelMenusMatchedByTitle\n";
+}
+
+void TestDuplicateTopLevelTitlesAreNotMatched() {
+    std::vector<MenuNode> bar = { OneItemMenu(L"A", L"A item", 102), OneItemMenu(L"B", L"B item", 103) };
+    FakeMenu duplicateLive({ L"A", L"A", L"B" });
+    duplicateLive.Set({ 0 }, { 5 });
+    duplicateLive.Set({ 1 }, { 6 });
+    duplicateLive.Set({ 2 }, { 7 });
+    assert((LinkedNames(MenuLink::Link(bar, duplicateLive, {})) == std::vector<std::wstring>{ L"B item" }));
+
+    std::vector<MenuNode> duplicateBar = { OneItemMenu(L"A", L"A item", 102), OneItemMenu(L"A", L"Other A item", 106),
+                                           OneItemMenu(L"B", L"B item", 103) };
+    FakeMenu live({ L"A", L"B" });
+    live.Set({ 0 }, { 5 });
+    live.Set({ 1 }, { 7 });
+    assert((LinkedNames(MenuLink::Link(duplicateBar, live, {})) == std::vector<std::wstring>{ L"B item" }));
+
+    // If only duplicated titles are left, nothing matches
+    FakeMenu onlyDuplicates({ L"A", L"A" });
+    assert(MenuLink::FitScore(std::vector<MenuNode>{ OneItemMenu(L"A", L"A item", 102) }, onlyDuplicates) == -1);
+    std::cout << "[PASS] TestDuplicateTopLevelTitlesAreNotMatched\n";
+}
+
+void TestTopLevelOrderMustAgree() {
+    std::vector<MenuNode> bar = { OneItemMenu(L"A", L"A item", 102), OneItemMenu(L"B", L"B item", 103) };
+    FakeMenu swapped({ L"B", L"A" });
+    swapped.Set({ 0 }, { 6 });
+    swapped.Set({ 1 }, { 5 });
+    assert(MenuLink::FitScore(bar, swapped) == -1 && MenuLink::Link(bar, swapped, {}).empty());
+    std::cout << "[PASS] TestTopLevelOrderMustAgree\n";
+}
+
+void TestNoCommonTopLevelTitleDoesNotFit() {
+    std::vector<MenuNode> bar = { OneItemMenu(L"A", L"A item", 102) };
+    FakeMenu other({ L"X", L"Y" });
+    other.Set({ 0 }, { 5 });
+    other.Set({ 1 }, { 6 });
+    assert(MenuLink::FitScore(bar, other) == -1 && MenuLink::Link(bar, other, {}).empty());
+    std::cout << "[PASS] TestNoCommonTopLevelTitleDoesNotFit\n";
+}
+
+void TestEmptyTopLevelTitlesNeverMatch() {
+    std::vector<MenuNode> bar = { OneItemMenu(L"", L"Nameless item", 101), OneItemMenu(L"A", L"A item", 102) };
+    FakeMenu live({ L"", L"A" });
+    live.Set({ 0 }, { 5 });
+    live.Set({ 1 }, { 6 });
+    assert((LinkedNames(MenuLink::Link(bar, live, {})) == std::vector<std::wstring>{ L"A item" }));
+
+    FakeMenu onlyEmpty({ L"" });
+    onlyEmpty.Set({ 0 }, { 5 });
+    assert(MenuLink::FitScore(std::vector<MenuNode>{ OneItemMenu(L"", L"Nameless item", 101) }, onlyEmpty) == -1);
+    std::cout << "[PASS] TestEmptyTopLevelTitlesNeverMatch\n";
 }
 
 void TestEmptyBarDoesNotFit() {
@@ -849,11 +997,12 @@ void TestPlaceholderIsNeverOffered() {
     std::cout << "[PASS] TestPlaceholderIsNeverOffered\n";
 }
 
-void TestPlaceholderSegmentGoneLinksNothing() {
-    // The whole segment of the placeholder is missing, so neither separator can be told from the other
-    assert(LinkOne(ListMenu(), { 1, S, 2 }).empty());
+void TestPlaceholderSegmentVanishes() {
+    // A list that is empty takes its segment and one separator with it
+    assert((LinkedIds(LinkOne(ListMenu(), { 1, S, 2 })) == std::vector<unsigned>{ 1, 2 }));
+    // With the other separator gone as well, the two ends cannot be told apart
     assert(LinkOne(ListMenu(), { 1, 2 }).empty());
-    std::cout << "[PASS] TestPlaceholderSegmentGoneLinksNothing\n";
+    std::cout << "[PASS] TestPlaceholderSegmentVanishes\n";
 }
 
 void TestPlaceholderRegionSizeMismatch() {
@@ -937,8 +1086,8 @@ void TestSameNameKeepsItsOwnPosition() {
 }
 
 // The real graphic override popup is [408, S, 1840..1849, S, 566, S, 407] and 566 must stay
-// unlinked, so the first live segment of the region is the list. This assumes a current export
-// lists every static segment; a stale export is caught by the staleness check.
+// unlinked, so the first live segment of the region is the list. This assumes the scheme lists
+// every static segment.
 void TestListRegionTakesFirstLiveSegment() {
     const std::vector<DynamicList> lists = { { kGraphicOverridePlaceholder, Wide({ L"X", L"Y", L"Z" }) } };
     auto commands = LinkOne(ListMenu(), { 1, S, 10, S, 11, 12, S, 2 }, lists);
@@ -948,22 +1097,257 @@ void TestListRegionTakesFirstLiveSegment() {
     std::cout << "[PASS] TestListRegionTakesFirstLiveSegment\n";
 }
 
-static FILETIME FileTimeFrom(unsigned long long ticks) {
-    FILETIME time;
-    time.dwLowDateTime = static_cast<DWORD>(ticks & 0xFFFFFFFFull);
-    time.dwHighDateTime = static_cast<DWORD>(ticks >> 32);
-    return time;
+static MenuNode AddOnNode(const wchar_t* name, unsigned number, unsigned mdid1, unsigned mdid2) {
+    MenuNode node = ItemNode(name, number);
+    node.mdid1 = mdid1;
+    node.mdid2 = mdid2;
+    return node;
 }
 
-void TestStaleExport() {
-    // Across the 32-bit boundary of the low word
-    const unsigned long long ticks = 0x1FFFFFFFFull;
-    FILETIME exportTime = FileTimeFrom(ticks);
-    assert(MenuLink::IsExportStale(exportTime, { FileTimeFrom(ticks - 1), FileTimeFrom(ticks + 1) }));
-    assert(!MenuLink::IsExportStale(exportTime, { FileTimeFrom(ticks - 1) }));
-    assert(!MenuLink::IsExportStale(exportTime, {}));
-    assert(!MenuLink::IsExportStale(exportTime, { FileTimeFrom(ticks) }));
-    std::cout << "[PASS] TestStaleExport\n";
+static std::wstring DumpAll(const std::vector<MenuNode>& nodes) {
+    std::wstring text;
+    for (const MenuNode& node : nodes) text += (text.empty() ? L"" : L";") + Dump(node);
+    return text;
+}
+
+// The export holds one command of the pair 7:8 and nothing else
+static std::vector<MenuNode> ExportOfOneAddOn() {
+    return { PopupNode(L"M", { AddOnNode(L"Kept", 20, 7, 8) }) };
+}
+
+void TestAbsentAddOnItemsAreDropped() {
+    std::vector<MenuNode> bar = {
+        PopupNode(L"M", { ItemNode(L"a", 10), SeparatorNode(),
+                          PopupNode(L"Gone", { AddOnNode(L"b", 30, 1, 2), SeparatorNode(), AddOnNode(L"c", 31, 3, 4) }),
+                          AddOnNode(L"d", 20, 7, 8), ItemNode(L"e", 11) }),
+        PopupNode(L"Add-On menu", { PopupNode(L"Deep", { AddOnNode(L"f", 32, 1, 2) }) }),
+        PopupNode(L"Last", { ItemNode(L"g", 12) }),
+    };
+    DropAbsentAddOnItems(bar, ExportOfOneAddOn());
+    // Built-in a and e stay although the export does not list them; the popup that held only absent
+    // items is gone, so d moves up; the add-on menu is gone with its only submenu
+    assert(DumpAll(bar) == L"P:M[I:a#10,S,I:d#20,I:e#11];P:Last[I:g#12]");
+    std::cout << "[PASS] TestAbsentAddOnItemsAreDropped\n";
+}
+
+void TestMixedPopupKeepsPresentItems() {
+    std::vector<MenuNode> bar = { PopupNode(L"M", { PopupNode(L"Mixed", { AddOnNode(L"b", 30, 1, 2), AddOnNode(L"d", 20, 7, 8),
+                                                                         SeparatorNode(), AddOnNode(L"c", 31, 3, 4) }) }) };
+    DropAbsentAddOnItems(bar, ExportOfOneAddOn());
+    assert(DumpAll(bar) == L"P:M[P:Mixed[I:d#20,S]]");
+    // The pair decides, not the number: the same number with another pair is a different command
+    bar = { PopupNode(L"M", { AddOnNode(L"x", 20, 7, 9), AddOnNode(L"y", 99, 7, 8) }) };
+    DropAbsentAddOnItems(bar, ExportOfOneAddOn());
+    assert(DumpAll(bar) == L"P:M[I:y#99]");
+    std::cout << "[PASS] TestMixedPopupKeepsPresentItems\n";
+}
+
+void TestAlreadyEmptyPopupStays() {
+    std::vector<MenuNode> bar = { PopupNode(L"M", { PopupNode(L"Empty", {}), PopupNode(L"Separators", { SeparatorNode() }),
+                                                    PopupNode(L"Emptied", { AddOnNode(L"b", 30, 1, 2) }), ItemNode(L"a", 10) }),
+                                  PopupNode(L"EmptyMenu", {}) };
+    DropAbsentAddOnItems(bar, ExportOfOneAddOn());
+    assert(DumpAll(bar) == L"P:M[P:Empty[],P:Separators[S],I:a#10];P:EmptyMenu[]");
+    std::cout << "[PASS] TestAlreadyEmptyPopupStays\n";
+}
+
+void TestAttachNamesByFullId() {
+    std::vector<MenuNode> bar = { PopupNode(L"M", { AddOnNode(L"", 1027, 5, 6), AddOnNode(L"", 1027, 7, 8), ItemNode(L"", 1027),
+                                                    PopupNode(L"Sub", { ItemNode(L"", 2) }), ItemNode(L"", 3) }) };
+    std::vector<MenuNode> exportBar = {
+        PopupNode(L"Other", { AddOnNode(L"First add-on", 1027, 5, 6), ItemNode(L"Built-in", 1027) }),
+        PopupNode(L"Elsewhere", { PopupNode(L"Deeper", { AddOnNode(L"Second add-on", 1027, 7, 8), ItemNode(L"Two", 2) }) }),
+    };
+    AttachNames(bar, exportBar);
+    const std::vector<MenuNode>& items = bar[0].children;
+    assert(items[0].name == L"First add-on" && items[1].name == L"Second add-on" && items[2].name == L"Built-in");
+    assert(items[3].children[0].name == L"Two");
+    assert(items[4].name.empty());   // no name in the export: stays empty
+    assert(items[3].name == L"Sub" && bar[0].name == L"M");   // popups keep their own titles
+    std::cout << "[PASS] TestAttachNamesByFullId\n";
+}
+
+void TestLinkedCommandCarriesItsFullId() {
+    std::vector<MenuNode> bar = OneMenu({ AddOnNode(L"Add-on", 1027, 0x47246d64, 0x3bbe5ae9), ItemNode(L"", 12) });
+    FakeMenu live = OneLive({ 1, 2 });
+    auto commands = MenuLink::Link(bar, live, {});
+    assert(commands.size() == 2);
+    assert(commands[0].commandNumber == 1027 && commands[0].mdid1 == 0x47246d64u && commands[0].mdid2 == 0x3bbe5ae9u);
+    // An item without a name is linked with an empty name; the position stays right
+    assert(commands[1].name.empty() && commands[1].commandNumber == 12 && commands[1].liveId == 2);
+    assert((commands[1].position == std::vector<int>{ 0, 1 }));
+    std::cout << "[PASS] TestLinkedCommandCarriesItsFullId\n";
+}
+
+// Only these ids are replaced by Archicad at run time; the same number with another MDID is a normal command
+void TestPlaceholdersAreKeyedByFullId() {
+    const MenuNode notOffered[] = {
+        AddOnNode(L"repeat last command", 1027, 0, 0), AddOnNode(L"reopen last output", 20754, 0, 0),
+        AddOnNode(L"graphic override list", 23040, 0, 0),
+    };
+    for (const MenuNode& node : notOffered) {
+        assert(LinkOne({ ItemNode(L"A", 11), node, ItemNode(L"B", 12) }, { 1, 2, 3 }).size() == 2);
+    }
+    // The list of an add-on is an add-on item too, so its part links nothing. In a part of its own it is
+    // anchored around like any placeholder: an ordinary item would leave the extra live part unexplained.
+    const MenuNode addOnList = AddOnNode(L"no variant combinations", 1027, 0x47246d64, 0xbca36043);
+    assert(LinkOne({ ItemNode(L"A", 11), addOnList, ItemNode(L"B", 12) }, { 1, 2, 3 }).empty());
+    assert((LinkedIds(LinkOne({ ItemNode(L"A", 11), SeparatorNode(), addOnList, SeparatorNode(), ItemNode(L"B", 12) },
+                              { 1, S, 5, 6, S, 7, S, 3 })) == std::vector<unsigned>{ 1, 3 }));
+    const MenuNode offered[] = {
+        AddOnNode(L"select connected horizontal guides", 1027, 0x47246d64, 0x3bbe5ae9), AddOnNode(L"Add-On Manager", 1293, 0, 0),
+        AddOnNode(L"same number, add-on MDID", 20754, 1, 2), AddOnNode(L"same number, add-on MDID", kAddOnPlaceholder, 1, 2),
+    };
+    for (const MenuNode& node : offered) {
+        auto commands = LinkOne({ ItemNode(L"A", 11), node, ItemNode(L"B", 12) }, { 1, 2, 3 });
+        assert(commands.size() == 3 && commands[1].liveId == 2 && commands[1].name == node.name);
+    }
+    std::cout << "[PASS] TestPlaceholdersAreKeyedByFullId\n";
+}
+
+void TestDroppedEntriesMarkTheirPart() {
+    std::vector<MenuNode> bar = { PopupNode(L"M", { ItemNode(L"a", 10), SeparatorNode(), AddOnNode(L"b", 30, 1, 2), ItemNode(L"c", 11),
+                                                    SeparatorNode(), PopupNode(L"Gone", { AddOnNode(L"d", 31, 1, 2) }), ItemNode(L"e", 12),
+                                                    AddOnNode(L"f", 20, 7, 8), SeparatorNode(), ItemNode(L"g", 13) }) };
+    DropAbsentAddOnItems(bar, ExportOfOneAddOn());
+    const std::vector<MenuNode>& m = bar[0].children;
+    assert(DumpAll(m) == L"I:a#10;S;I:c#11;S;I:e#12;I:f#20;S;I:g#13");
+    // The part that lost an item and the one that lost a popup are marked, the others and the separators are not
+    const bool expected[] = { false, false, true, false, true, true, false, false };
+    for (size_t i = 0; i < m.size(); ++i) assert(m[i].partLostEntries == expected[i]);
+    std::cout << "[PASS] TestDroppedEntriesMarkTheirPart\n";
+}
+
+// A part around a placeholder links nothing if it holds an add-on item or lost an entry to
+// DropAbsentAddOnItems: the add-ons loaded now may not be the ones of the export
+void TestUncertainPartAroundPlaceholderLinksNothing() {
+    const MenuNode list = ItemNode(L"P", kGraphicOverridePlaceholder);
+    assert(LinkOne({ AddOnNode(L"X", 9, 5, 6), ItemNode(L"A", 11), list, ItemNode(L"B", 12) }, { 1, 2, 3, 4 }).empty());
+    assert(LinkOne({ ItemNode(L"A", 11), list, AddOnNode(L"X", 9, 5, 6) }, { 1, 2, 3, 4 }).empty());
+    // Without a placeholder the exact count still decides
+    assert(LinkOne({ AddOnNode(L"X", 9, 5, 6), ItemNode(L"A", 11) }, { 1, 2 }).size() == 2);
+    // Y was dropped, but its add-on may be loaded by now
+    std::vector<MenuNode> bar = OneMenu({ AddOnNode(L"Y", 9, 1, 2), ItemNode(L"A", 11), list, ItemNode(L"B", 12), SeparatorNode(),
+                                          ItemNode(L"C", 13) });
+    DropAbsentAddOnItems(bar, ExportOfOneAddOn());
+    FakeMenu live = OneLive({ 9, 1, 5, 2, S, 3 });
+    assert(LinkedNames(MenuLink::Link(bar, live, {})) == Wide({ L"C" }));
+    // A lone list placeholder whose part lost an entry gives no names to the live part in its place
+    bar = OneMenu({ ItemNode(L"A", 11), SeparatorNode(), AddOnNode(L"Y", 9, 1, 2), list, SeparatorNode(), ItemNode(L"B", 12) });
+    DropAbsentAddOnItems(bar, ExportOfOneAddOn());
+    FakeMenu listLive = OneLive({ 1, S, 9, 10, S, 2 });
+    const std::vector<DynamicList> lists = { { kGraphicOverridePlaceholder, Wide({ L"X", L"Y", L"Z" }) } };
+    assert(LinkedNames(MenuLink::Link(bar, listLive, lists)) == Wide({ L"A", L"B" }));
+    std::cout << "[PASS] TestUncertainPartAroundPlaceholderLinksNothing\n";
+}
+
+// The add-on of Y is not loaded and the list is empty, so nothing of the part is left in the live menu;
+// whether the add-on came back shows in the live part count. An add-on item that stays is a static entry.
+void TestPlaceholderPartWithAddOnEntries() {
+    std::vector<MenuNode> bar = OneMenu({ ItemNode(L"A", 11), SeparatorNode(), AddOnNode(L"Y", 9, 1, 2),
+                                          ItemNode(L"P", kGraphicOverridePlaceholder), SeparatorNode(), ItemNode(L"B", 12) });
+    DropAbsentAddOnItems(bar, ExportOfOneAddOn());
+    FakeMenu live = OneLive({ 1, S, 2 });
+    assert((LinkedIds(MenuLink::Link(bar, live, {})) == std::vector<unsigned>{ 1, 2 }));
+    assert(LinkOne({ ItemNode(L"A", 11), SeparatorNode(), AddOnNode(L"Y", 9, 1, 2), ItemNode(L"P", kGraphicOverridePlaceholder),
+                     SeparatorNode(), ItemNode(L"B", 12) }, { 1, S, 2 }).empty());
+    std::cout << "[PASS] TestPlaceholderPartWithAddOnEntries\n";
+}
+
+void TestItemsNamedEmptyAreRemoved() {
+    std::vector<MenuNode> bar = OneMenu({ ItemNode(L"a", 10), ItemNode(L"(Empty)", 20), AddOnNode(L"(Empty)", 21, 7, 8),
+                                          PopupNode(L"Sub", { ItemNode(L"(Empty)", 22), ItemNode(L"b", 11) }) });
+    ReduceToShownMenu(bar);
+    assert(DumpAll(bar) == L"P:M[I:a#10,P:Sub[I:b#11]]");
+    // Only the exact text counts, and an item without a name is a command the export does not know
+    bar = OneMenu({ ItemNode(L"(empty)", 10), ItemNode(L"Empty", 11), ItemNode(L"(Empty) x", 12), ItemNode(L"", 13) });
+    const std::wstring before = DumpAll(bar);
+    ReduceToShownMenu(bar);
+    assert(DumpAll(bar) == before);
+    std::cout << "[PASS] TestItemsNamedEmptyAreRemoved\n";
+}
+
+void TestPlaceholdersNamedEmptyStay() {
+    std::vector<MenuNode> bar = OneMenu({ ItemNode(L"(Empty)", kGraphicOverridePlaceholder), AddOnNode(L"(Empty)", 1027, 0x47246d64, 0xbca36043) });
+    const std::wstring before = DumpAll(bar);
+    ReduceToShownMenu(bar);
+    assert(DumpAll(bar) == before);
+    std::cout << "[PASS] TestPlaceholdersNamedEmptyStay\n";
+}
+
+void TestPopupsWithoutEntriesAreRemoved() {
+    std::vector<MenuNode> bar = OneMenu({ PopupNode(L"Empty", {}), PopupNode(L"Separators", { SeparatorNode() }),
+                                          PopupNode(L"Outer", { PopupNode(L"Inner", { ItemNode(L"(Empty)", 20) }), SeparatorNode() }),
+                                          PopupNode(L"List", { ItemNode(L"P", kGraphicOverridePlaceholder) }), ItemNode(L"a", 10) });
+    ReduceToShownMenu(bar);
+    assert(DumpAll(bar) == L"P:M[P:List[I:P#23040],I:a#10]");
+    std::cout << "[PASS] TestPopupsWithoutEntriesAreRemoved\n";
+}
+
+void TestSurplusSeparatorsAreRemoved() {
+    std::vector<MenuNode> bar = OneMenu({ SeparatorNode(), SeparatorNode(), ItemNode(L"a", 10), SeparatorNode(), SeparatorNode(),
+                                          ItemNode(L"b", 11), SeparatorNode(), ItemNode(L"(Empty)", 20), SeparatorNode(),
+                                          PopupNode(L"Empty", {}), SeparatorNode(),
+                                          PopupNode(L"Sub", { SeparatorNode(), ItemNode(L"c", 12), SeparatorNode() }), SeparatorNode() });
+    ReduceToShownMenu(bar);
+    assert(DumpAll(bar) == L"P:M[I:a#10,S,I:b#11,S,P:Sub[I:c#12]]");
+    std::cout << "[PASS] TestSurplusSeparatorsAreRemoved\n";
+}
+
+void TestReductionKeepsTopLevelMenus() {
+    std::vector<MenuNode> bar = { PopupNode(L"M", { ItemNode(L"(Empty)", 20) }), PopupNode(L"Empty", {}) };
+    ReduceToShownMenu(bar);
+    assert(DumpAll(bar) == L"P:M[];P:Empty[]");
+    std::cout << "[PASS] TestReductionKeepsTopLevelMenus\n";
+}
+
+static std::wstring MarkedParts(const std::vector<MenuNode>& nodes) {
+    std::wstring marks;
+    for (const MenuNode& node : nodes) marks += node.partLostEntries ? L'x' : L'-';
+    return marks;
+}
+
+// A part that lost an "(Empty)" Item may have shifted under the add-ons loaded now, like a part that lost an
+// add-on item: its entries are marked, the separators and the other parts are not
+void TestReductionMarksPartThatLostAnItem() {
+    std::vector<MenuNode> bar = OneMenu({ ItemNode(L"a", 10), ItemNode(L"(Empty)", 20), ItemNode(L"b", 11), SeparatorNode(),
+                                          ItemNode(L"c", 12), SeparatorNode(), ItemNode(L"d", 13), ItemNode(L"(Empty)", 21) });
+    ReduceToShownMenu(bar);
+    assert(DumpAll(bar) == L"P:M[I:a#10,I:b#11,S,I:c#12,S,I:d#13]");
+    assert(MarkedParts(bar[0].children) == L"xx---x");
+    std::cout << "[PASS] TestReductionMarksPartThatLostAnItem\n";
+}
+
+// Parts are the original ones: surplus separators go after the marking, so a mark never lands in the next part
+void TestReductionMarksByOriginalParts() {
+    std::vector<MenuNode> bar = OneMenu({ ItemNode(L"a", 10), SeparatorNode(), ItemNode(L"(Empty)", 20), SeparatorNode(), ItemNode(L"b", 11),
+                                          SeparatorNode(), SeparatorNode(), ItemNode(L"c", 12), ItemNode(L"(Empty)", 21), SeparatorNode(),
+                                          ItemNode(L"(Empty)", 22), SeparatorNode(), ItemNode(L"d", 13) });
+    ReduceToShownMenu(bar);
+    assert(DumpAll(bar) == L"P:M[I:a#10,S,I:b#11,S,I:c#12,S,I:d#13]");
+    assert(MarkedParts(bar[0].children) == L"----x--");
+    std::cout << "[PASS] TestReductionMarksByOriginalParts\n";
+}
+
+// Removing an empty popup, or a part that vanishes with its separators, marks nothing
+void TestReductionMarksNothingForAnEmptyPopup() {
+    std::vector<MenuNode> bar = OneMenu({ ItemNode(L"a", 10), PopupNode(L"Empty", {}), SeparatorNode(), ItemNode(L"b", 11) });
+    ReduceToShownMenu(bar);
+    assert(DumpAll(bar) == L"P:M[I:a#10,S,I:b#11]");
+    assert(MarkedParts(bar[0].children) == L"---");
+    std::cout << "[PASS] TestReductionMarksNothingForAnEmptyPopup\n";
+}
+
+// Each level has its own parts: the inner part that lost an item is marked, the popup and its neighbours are not
+void TestReductionMarksPerLevel() {
+    std::vector<MenuNode> bar = OneMenu({ ItemNode(L"a", 10),
+                                          PopupNode(L"Sub", { ItemNode(L"x", 11), ItemNode(L"(Empty)", 20), SeparatorNode(), ItemNode(L"y", 12) }),
+                                          ItemNode(L"b", 13) });
+    ReduceToShownMenu(bar);
+    assert(DumpAll(bar) == L"P:M[I:a#10,P:Sub[I:x#11,S,I:y#12],I:b#13]");
+    assert(MarkedParts(bar[0].children) == L"---");
+    assert(MarkedParts(bar[0].children[1].children) == L"x--");
+    std::cout << "[PASS] TestReductionMarksPerLevel\n";
 }
 
 int main() {
@@ -979,6 +1363,7 @@ int main() {
     TestDepthLimitNotCycle();
     TestNodeBudgetStopsExpansion();
     TestInputSizeLimit();
+    TestSchemeReaderKeepsMdidParts();
     TestExactTreeShape();
     TestPicksBarByGuidNotOrder();
     TestDuplicateBarGuidIsEmpty();
@@ -995,9 +1380,17 @@ int main() {
     TestListTooShortNotOffered();
     TestListWithoutRegisteredPlaceholderStaysUnlinked();
     TestListNeedsOnlyItems();
+    TestNewLivePartTakesPlaceOfLastSchemePart();
+    TestHiddenStaticPartNextToPlaceholderRegionLinksToTheList();
+    TestOnlyLinkedUnnamedItemsAreCounted();
     TestFitScoreRejectsOtherLanguage();
     TestFitScoreCountsLinks();
-    TestTopLevelTitlesMustMatchExactly();
+    TestTopLevelFitRules();
+    TestTopLevelMenusMatchedByTitle();
+    TestDuplicateTopLevelTitlesAreNotMatched();
+    TestTopLevelOrderMustAgree();
+    TestNoCommonTopLevelTitleDoesNotFit();
+    TestEmptyTopLevelTitlesNeverMatch();
     TestEmptyBarDoesNotFit();
     TestTypeMismatchDropsSegment();
     TestTypeMismatchAtAnchorDropsSegment();
@@ -1007,13 +1400,30 @@ int main() {
     TestOnePlaceholderEqualCount();
     TestTwoPlaceholdersInOneSegment();
     TestPlaceholderIsNeverOffered();
-    TestPlaceholderSegmentGoneLinksNothing();
+    TestPlaceholderSegmentVanishes();
     TestPlaceholderRegionSizeMismatch();
     TestDynamicItemIsNeverOffered();
     TestAnsichtExactLinkSet();
     TestSameNameKeepsItsOwnPosition();
     TestListRegionTakesFirstLiveSegment();
-    TestStaleExport();
+    TestAbsentAddOnItemsAreDropped();
+    TestMixedPopupKeepsPresentItems();
+    TestAlreadyEmptyPopupStays();
+    TestAttachNamesByFullId();
+    TestLinkedCommandCarriesItsFullId();
+    TestPlaceholdersAreKeyedByFullId();
+    TestDroppedEntriesMarkTheirPart();
+    TestUncertainPartAroundPlaceholderLinksNothing();
+    TestPlaceholderPartWithAddOnEntries();
+    TestItemsNamedEmptyAreRemoved();
+    TestPlaceholdersNamedEmptyStay();
+    TestPopupsWithoutEntriesAreRemoved();
+    TestSurplusSeparatorsAreRemoved();
+    TestReductionKeepsTopLevelMenus();
+    TestReductionMarksPartThatLostAnItem();
+    TestReductionMarksByOriginalParts();
+    TestReductionMarksNothingForAnEmptyPopup();
+    TestReductionMarksPerLevel();
     std::cout << "All command line tests passed\n";
     return 0;
 }
