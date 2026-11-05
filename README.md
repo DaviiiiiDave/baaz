@@ -43,11 +43,12 @@ from an environment variable of the same name. Without it, only the tests build.
 ### Add-on ID (MDID)
 
 Archicad only loads add-ons whose `MDID` resource is a developer ID and add-on ID
-pair issued by Graphisoft (request one from the Graphisoft developer program).
-`addon/resources/RFIX/AddOnFix.grc` holds placeholders that Archicad rejects with
-"This add-on cannot be validated". Replace them with your own IDs.
+pair issued by Graphisoft. `addon/resources/RFIX/AddOnFix.grc` holds the IDs
+registered for Baaz. If you fork Baaz and distribute your own build, replace them
+with your own IDs (request them from the Graphisoft developer program): Archicad
+cannot load two add-ons with the same MDID at the same time.
 
-For local testing before you have IDs, put an `'MDID' 32500` resource in
+To test locally with a different MDID, put an `'MDID' 32500` resource in
 `addon/resources/AddOnFix.local.grc` (git-ignored) and configure with
 `-DBAAZ_DEV_MDID=ON`. Never distribute a build made that way.
 

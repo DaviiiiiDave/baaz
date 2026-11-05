@@ -1,8 +1,9 @@
 /* The MDID must be a developer ID + add-on ID pair issued by Graphisoft.
    Archicad checks both values and rejects anything else with
-   "This add-on cannot be validated". These are placeholders until Baaz has
-   its own IDs; for local testing see BAAZ_DEV_MDID in addon/CMakeLists.txt. */
+   "This add-on cannot be validated". These IDs are registered for Baaz;
+   a fork that distributes its own build needs its own IDs. For local testing
+   with another MDID see BAAZ_DEV_MDID in addon/CMakeLists.txt. */
 'MDID' 32500 "Add-On Identifier" {
-	1245791053
-	1213547569
+	829510500
+	440734808
 }
