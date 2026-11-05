@@ -93,8 +93,8 @@ current, and takes only the item **names** from an export.
   position, so a new live part that the scheme does not hold (for example an add-on's own part
   after a separator at the end of a menu) can take the place of the last scheme part (re-review
   2026-11-04, I-1, decided by Dave: document and pin with a test; not observed in Archicad).
-  Items left unlinked because their part is uncertain are **not** counted for the hint
-  (section 5; Dave 2026-11-04): no export can make them linkable.
+  Items left unlinked for any reason are not counted for the hint (section 5; Dave 2026-11-05):
+  no export can make them linkable.
 - **The scheme is reduced to what Archicad shows** (diagnosis 2026-11-05 on the live AC29 menu,
   decided by Dave, option A). Without this, a scheme carried over several versions loses whole
   popups: 271 of 787 items in the office scheme. Before linking, inside every top-level menu
@@ -105,16 +105,22 @@ current, and takes only the item **names** from an export.
     are never removed. Without an export this rule cannot apply.
   - Popups without any `Item` or popup left are removed; Archicad does not show them.
   - Leading, trailing and repeated separators are removed; Archicad does not show them.
-  These removals do not make a part uncertain: the entries were never in the live menu. If an
-  `(Empty)` item were shown after all, the count differs and the part stays unlinked. The empty
-  rest of a part that lost everything to the add-on rule above goes too, so a new live part in
-  its place falls under remaining risk (2) when a placeholder is near, else the part count
-  differs and nothing links.
+  If an `(Empty)` item were shown after all, the count of a part without a placeholder differs
+  and the part stays unlinked. Next to a placeholder the count cannot show that, so a part that
+  holds a placeholder and lost an `(Empty)` item counts as uncertain and links nothing (Dave
+  2026-11-05; the office scheme has no such part, so this costs no command). The empty rest of a
+  part that lost everything to the add-on rule above goes too, so a new live part in its place
+  falls under remaining risk (2) when a placeholder is near, else the part count differs and
+  nothing links.
 - **A placeholder part may vanish.** A part holding only placeholders whose lists are empty is
   not in the live menu, nor is its separator. If the live menu has exactly the parts before and
   after the placeholder region, and every part of that region holds only placeholders, the parts
   before and after link as usual (each still needs its exact count). A region that holds a static
   entry cannot vanish: if it is missing, something else changed and it links nothing around it.
+  Remaining risk (3), accepted by Dave 2026-11-05 and pinned by a test: if Archicad hides a static
+  part next to such a region while the list holds exactly as many entries, the static commands
+  link to the list entries (`[A | P | B]` against live `[A | e]` links B to e). It needs both at
+  once, was not observed, and the run-time re-check cannot catch it.
 - **No live source for "add-on loaded".** `ACAPI_AddOnAddOnCommunication_Test` (AC29 and AC30
   DevKits) tells installed from not installed, but a probe in Archicad 29 (2026-11-04) showed an
   add-on switched off in the Add-On Manager still reads as present. It therefore cannot replace
@@ -164,23 +170,21 @@ dann eine Mini-Anleitung"). Views, tools and everything else stay searchable as 
 | State | Hint (wording left to the builder, English like the other HUD texts) |
 |---|---|
 | No export found | Commands need one export. Guide: Enter opens Work Environment → export the profile to `…\.baaz\commands` → open the HUD again |
-| Some items cannot be offered for a reason a new export can fix: no name (added after the export) or a count that does not match (section 3) | *N* commands cannot be searched yet. Same guide |
+| Some linked items have no name: they were added after the export | *N* commands cannot be searched yet. Same guide |
 | The active profile or its `.bin` cannot be found or read (unknown format, for example after an Archicad update), or that `.bin` fits no menu | Command list cannot be read for this Archicad version. No commands are offered |
 
-- *N* counts only what a new export can fix (Dave 2026-11-04, option A of the re-review; it
-  narrows option A of the final review). It counts the non-placeholder `Item`s of top-level
-  menus whose title matched the live bar that are either linked but have no name in the export,
-  or not linked because a count did not match (a part, a popup or the parts around a
-  placeholder region). Not counted: items of a part left unlinked because it is uncertain
-  (section 3, also when that part's count does not match either), placeholders, menus whose
-  title is not in the live bar (for example *Apple*) and items removed by the add-on rule of
-  section 3. Those uncertain-part commands are simply not offered, without a hint: measured on
-  the real schemes (re-review 2026-11-04) they are tens of commands that no export can make
-  linkable (37 in the office scheme, 18 in the AC29 standard scheme), and a hint that never goes
-  away would teach users to ignore it. Items removed because Archicad does not show them
-  (section 3) are not counted either: they are not commands. Right after a fresh export of the
-  current state *N* is 0, apart from entries Archicad shows only in some situations (for example
-  Teamwork commands in a solo project); that rest is measured in the Task 3c manual check.
+- *N* counts only what a new export can fix: linked, non-placeholder `Item`s without a name in the
+  export (Dave 2026-11-05; it replaces option A of the final review and of the re-review). The
+  structure comes from the live `.bin`, so a new export cannot link a part that did not link.
+  Everything else stays uncounted and is simply not offered: items of uncertain parts (section 3),
+  items of parts whose count differs, items Archicad shows only in some situations, placeholders,
+  menus whose title is not in the live bar (for example *Apple*) and items removed in section 3.
+  Measured on the office scheme in a test project (2026-11-05): 691 commands offered, 37 in
+  uncertain parts, 23 of parts Archicad shows differently by situation (for example a popup for a
+  device that is not connected, Teamwork commands in a solo project). A hint that no export can
+  clear would teach users to ignore it. The cost is accepted: an add-on switched off in the
+  Add-On Manager loses its neighbouring commands without a hint. Right after a fresh export
+  *N* is 0.
 - *(My call)* The hint row is never the default selection, takes no slot from the result count,
   is reachable with the arrow keys and runs on Enter or click only, not on Space. Typing
   `lineal` and pressing Enter must keep running *Lineal*.
