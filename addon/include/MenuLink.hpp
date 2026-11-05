@@ -54,13 +54,14 @@ public:
     //   came at the same position keep the count equal;
     // - around a placeholder region whole parts are anchored by position, so a new live part the
     //   scheme does not hold (e.g. an add-on's own part after a separator at the end of a menu) can
-    //   take the place of the last scheme part, whose commands then run the new part's entries.
+    //   take the place of the last scheme part, whose commands then run the new part's entries; the
+    //   same goes for a new part where ReduceToShownMenu removed the empty rest of a part.
     // notSearchable, if given: the Items (not placeholders) of the top-level menus whose title matched,
     // at any depth, that a new export can make searchable: linked without a name, or not linked
     // because a count differs (a part, a popup, the parts around a placeholder region, a menu whose
     // parts do not match). Not counted: the Items of a part skipped as uncertain (see above), also
-    // when its count differs as well, placeholders, menus not in the live bar, items dropped by
-    // DropAbsentAddOnItems.
+    // when its count differs as well, placeholders, menus not in the live bar, items removed by
+    // DropAbsentAddOnItems or ReduceToShownMenu.
     static std::vector<LinkedCommand> Link(const std::vector<MenuNode>& bar, MenuSource& live,
                                            const std::vector<DynamicList>& lists, size_t* notSearchable = nullptr);
     // -1 if no top-level menu has a title in common with the live bar, or the common ones are in
@@ -76,5 +77,11 @@ void DropAbsentAddOnItems(std::vector<MenuNode>& bar, const std::vector<MenuNode
 
 // Sets the name of every Item of bar whose full command id has an Item in exportBar; others stay as they are.
 void AttachNames(std::vector<MenuNode>& bar, const std::vector<MenuNode>& exportBar);
+
+// Removes from inside every top-level menu, at any depth, what Archicad does not show: Items named "(Empty)"
+// that are not placeholders (the text the export writes for commands this Archicad no longer offers), then
+// Popups with no Item or Popup left, then leading, trailing and repeated separators. The top-level menus
+// stay. No part gets partLostEntries: these entries are not in the live menu, whatever add-ons are loaded.
+void ReduceToShownMenu(std::vector<MenuNode>& bar);
 
 } // namespace Baaz

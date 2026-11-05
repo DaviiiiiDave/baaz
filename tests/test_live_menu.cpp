@@ -654,6 +654,89 @@ void TestCountMismatchPartIsCounted() {
     std::cout << "[PASS] TestCountMismatchPartIsCounted\n";
 }
 
+// --- Entries of the scheme that Archicad does not show ------------------------------------------
+
+static const std::string kA = Item(1, 0, 0);
+static const std::string kB = Item(2, 0, 0);
+static const std::string kC = Item(3, 0, 0);
+static const std::string kNotOffered = Item(4, 0, 0);   // a command this Archicad no longer offers
+static const std::string kCut = Separator();
+
+static const std::string kNames = TestMenuXml(XmlItem(1, "A") + XmlItem(2, "B") + XmlItem(3, "C") + XmlItem(4, "(Empty)"));
+
+// The files keep their path from test to test and may keep their size, so each gets a new time to be read again
+static int NextTime() {
+    static int time = 1000;
+    return ++time;
+}
+
+// The scheme menu "Test" holding entries against a live menu holding the ids in live, 0 for a separator
+static CommandIndex IndexFor(const std::vector<std::string>& entries, const std::vector<unsigned>& live) {
+    const int time = NextTime();
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    folders.WriteExport(time, kNames);
+    folders.WriteBin(TestBin(entries), time);
+    folders.UseScheme();
+    frame.List(live);
+    return IndexOf(frame.Hwnd());
+}
+
+static void AssertLinksAll(const std::vector<std::string>& entries, const std::vector<unsigned>& live,
+                           const std::vector<std::wstring>& titles, const std::vector<unsigned>& ids) {
+    const CommandIndex index = IndexFor(entries, live);
+    assert(Titles(index.commands) == titles && LiveIds(index.commands) == ids);
+    assert(index.state == CommandState::Ready && index.notSearchable == 0);
+}
+
+static const std::vector<std::wstring> kTitlesAB = { L"A", L"B" };
+static const std::vector<std::wstring> kTitlesABC = { L"A", L"B", L"C" };
+
+void TestItemNotShownLeavesItsPartLinked() {
+    AssertLinksAll({ kA, kNotOffered, kB }, { 201, 202 }, kTitlesAB, { 201, 202 });
+    AssertLinksAll({ kA, kCut, kNotOffered, kCut, kB }, { 201, 0, 202 }, kTitlesAB, { 201, 202 });   // a whole part
+    std::cout << "[PASS] TestItemNotShownLeavesItsPartLinked\n";
+}
+
+void TestPopupLeftEmptyLeavesItsPartLinked() {
+    AssertLinksAll({ kA, Popup(Menu(L"H", L"Hidden", { kNotOffered })), kB }, { 201, 202 }, kTitlesAB, { 201, 202 });
+    const std::string inner = Popup(Menu(L"I", L"Inner", { kNotOffered }));
+    AssertLinksAll({ kA, Popup(Menu(L"H", L"Hidden", { inner, kCut })), kB }, { 201, 202 }, kTitlesAB, { 201, 202 });
+    std::cout << "[PASS] TestPopupLeftEmptyLeavesItsPartLinked\n";
+}
+
+void TestSurplusSeparatorsLeaveTheMenuLinked() {
+    AssertLinksAll({ kA, kCut, kCut, kB }, { 201, 0, 202 }, kTitlesAB, { 201, 202 });
+    AssertLinksAll({ kCut, kA, kCut, kB, kCut }, { 201, 0, 202 }, kTitlesAB, { 201, 202 });
+    std::cout << "[PASS] TestSurplusSeparatorsLeaveTheMenuLinked\n";
+}
+
+// [A, (Empty), B | C] against the live [A, Z, B | C]: the count differs, and the removed item is not counted
+void TestItemShownAfterAllLeavesItsPartUnlinked() {
+    const CommandIndex index = IndexFor({ kA, kNotOffered, kB, kCut, kC }, { 201, 209, 202, 0, 203 });
+    assert((Titles(index.commands) == std::vector<std::wstring>{ L"C" }) && (LiveIds(index.commands) == std::vector<unsigned>{ 203 }));
+    assert(index.state == CommandState::NewCommands && index.notSearchable == 2);
+    std::cout << "[PASS] TestItemShownAfterAllLeavesItsPartUnlinked\n";
+}
+
+void TestRemovedEntriesDoNotMakeAPartUncertain() {
+    AssertLinksAll({ kA, kNotOffered, Item(kGraphicOverrides, 0, 0), kB, kCut, kC }, { 201, 801, 802, 202, 0, 203 },
+                   kTitlesABC, { 201, 202, 203 });
+    std::cout << "[PASS] TestRemovedEntriesDoNotMakeAPartUncertain\n";
+}
+
+// Popups and separators need no names: Work Environment is found before the first export
+void TestSchemeIsReducedWithoutAnExport() {
+    TestFrame frame(Fill::Normal);
+    TestFolders folders;
+    folders.WriteBin(TestBin({ kA, kCut, kCut, Item(7682, 0, 0) }), NextTime());
+    folders.UseScheme();
+    frame.List({ 201, 0, 210 });
+    const CommandIndex index = IndexOf(frame.Hwnd());
+    assert(index.state == CommandState::NoExport && index.workEnvironment.liveId == 210);
+    std::cout << "[PASS] TestSchemeIsReducedWithoutAnExport\n";
+}
+
 // --- Which scheme file is the active one: only the one the profile in use names ---------------
 
 static void AssertNothingOffered(HWND frame) {
@@ -1016,6 +1099,12 @@ int main() {
     TestBuiltInPartAroundPlaceholderStillLinks();
     TestNoExportAddOnPartLinksNoWorkEnvironment();
     TestCountMismatchPartIsCounted();
+    TestItemNotShownLeavesItsPartLinked();
+    TestPopupLeftEmptyLeavesItsPartLinked();
+    TestSurplusSeparatorsLeaveTheMenuLinked();
+    TestItemShownAfterAllLeavesItsPartUnlinked();
+    TestRemovedEntriesDoNotMakeAPartUncertain();
+    TestSchemeIsReducedWithoutAnExport();
     TestOnlyProfileSchemeIsUsed();
     TestProfileFoundByContent();
     TestNamedProfilesAreNotTheActiveProfile();

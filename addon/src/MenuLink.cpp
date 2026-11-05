@@ -452,4 +452,28 @@ void AttachNames(std::vector<MenuNode>& bar, const std::vector<MenuNode>& export
     SetNames(bar, names);
 }
 
+// Not translated: the export writes this text for a command this Archicad no longer offers
+static const wchar_t* const kNotOfferedName = L"(Empty)";
+
+static bool IsNotShown(const MenuNode& node) {
+    if (node.type == MenuNodeType::Popup) return !HoldsItemOrPopup(node.children);
+    return node.type == MenuNodeType::Item && node.name == kNotOfferedName && !IsPlaceholder(node);
+}
+
+static void ReduceEntries(std::vector<MenuNode>& nodes) {
+    std::vector<MenuNode> kept;
+    for (MenuNode& node : nodes) {
+        ReduceEntries(node.children);
+        if (IsNotShown(node)) continue;
+        const bool surplusSeparator = node.type == MenuNodeType::Separator && (kept.empty() || kept.back().type == MenuNodeType::Separator);
+        if (!surplusSeparator) kept.push_back(std::move(node));
+    }
+    if (!kept.empty() && kept.back().type == MenuNodeType::Separator) kept.pop_back();
+    nodes = std::move(kept);
+}
+
+void ReduceToShownMenu(std::vector<MenuNode>& bar) {
+    for (MenuNode& menu : bar) ReduceEntries(menu.children);
+}
+
 } // namespace Baaz

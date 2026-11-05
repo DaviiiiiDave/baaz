@@ -1214,6 +1214,61 @@ void TestUncertainPartAroundPlaceholderLinksNothing() {
     std::cout << "[PASS] TestUncertainPartAroundPlaceholderLinksNothing\n";
 }
 
+void TestItemsNamedEmptyAreRemoved() {
+    std::vector<MenuNode> bar = OneMenu({ ItemNode(L"a", 10), ItemNode(L"(Empty)", 20), AddOnNode(L"(Empty)", 21, 7, 8),
+                                          PopupNode(L"Sub", { ItemNode(L"(Empty)", 22), ItemNode(L"b", 11) }) });
+    ReduceToShownMenu(bar);
+    assert(DumpAll(bar) == L"P:M[I:a#10,P:Sub[I:b#11]]");
+    // Only the exact text counts, and an item without a name is a command the export does not know
+    bar = OneMenu({ ItemNode(L"(empty)", 10), ItemNode(L"Empty", 11), ItemNode(L"(Empty) x", 12), ItemNode(L"", 13) });
+    const std::wstring before = DumpAll(bar);
+    ReduceToShownMenu(bar);
+    assert(DumpAll(bar) == before);
+    std::cout << "[PASS] TestItemsNamedEmptyAreRemoved\n";
+}
+
+void TestPlaceholdersNamedEmptyStay() {
+    std::vector<MenuNode> bar = OneMenu({ ItemNode(L"(Empty)", kGraphicOverridePlaceholder), AddOnNode(L"(Empty)", 1027, 0x47246d64, 0xbca36043) });
+    const std::wstring before = DumpAll(bar);
+    ReduceToShownMenu(bar);
+    assert(DumpAll(bar) == before);
+    std::cout << "[PASS] TestPlaceholdersNamedEmptyStay\n";
+}
+
+void TestPopupsWithoutEntriesAreRemoved() {
+    std::vector<MenuNode> bar = OneMenu({ PopupNode(L"Empty", {}), PopupNode(L"Separators", { SeparatorNode() }),
+                                          PopupNode(L"Outer", { PopupNode(L"Inner", { ItemNode(L"(Empty)", 20) }), SeparatorNode() }),
+                                          PopupNode(L"List", { ItemNode(L"P", kGraphicOverridePlaceholder) }), ItemNode(L"a", 10) });
+    ReduceToShownMenu(bar);
+    assert(DumpAll(bar) == L"P:M[P:List[I:P#23040],I:a#10]");
+    std::cout << "[PASS] TestPopupsWithoutEntriesAreRemoved\n";
+}
+
+void TestSurplusSeparatorsAreRemoved() {
+    std::vector<MenuNode> bar = OneMenu({ SeparatorNode(), SeparatorNode(), ItemNode(L"a", 10), SeparatorNode(), SeparatorNode(),
+                                          ItemNode(L"b", 11), SeparatorNode(), ItemNode(L"(Empty)", 20), SeparatorNode(),
+                                          PopupNode(L"Empty", {}), SeparatorNode(),
+                                          PopupNode(L"Sub", { SeparatorNode(), ItemNode(L"c", 12), SeparatorNode() }), SeparatorNode() });
+    ReduceToShownMenu(bar);
+    assert(DumpAll(bar) == L"P:M[I:a#10,S,I:b#11,S,P:Sub[I:c#12]]");
+    std::cout << "[PASS] TestSurplusSeparatorsAreRemoved\n";
+}
+
+void TestReductionKeepsTopLevelMenus() {
+    std::vector<MenuNode> bar = { PopupNode(L"M", { ItemNode(L"(Empty)", 20) }), PopupNode(L"Empty", {}) };
+    ReduceToShownMenu(bar);
+    assert(DumpAll(bar) == L"P:M[];P:Empty[]");
+    std::cout << "[PASS] TestReductionKeepsTopLevelMenus\n";
+}
+
+void TestReductionMarksNoPart() {
+    std::vector<MenuNode> bar = OneMenu({ ItemNode(L"a", 10), ItemNode(L"(Empty)", 20), PopupNode(L"Empty", {}), SeparatorNode(), ItemNode(L"b", 11) });
+    ReduceToShownMenu(bar);
+    assert(DumpAll(bar) == L"P:M[I:a#10,S,I:b#11]");
+    for (const MenuNode& node : bar[0].children) assert(!node.partLostEntries);
+    std::cout << "[PASS] TestReductionMarksNoPart\n";
+}
+
 int main() {
     TestReadsFloorPlanBarOnly();
     TestRulerPosition();
@@ -1276,6 +1331,12 @@ int main() {
     TestPlaceholdersAreKeyedByFullId();
     TestDroppedEntriesMarkTheirPart();
     TestUncertainPartAroundPlaceholderLinksNothing();
+    TestItemsNamedEmptyAreRemoved();
+    TestPlaceholdersNamedEmptyStay();
+    TestPopupsWithoutEntriesAreRemoved();
+    TestSurplusSeparatorsAreRemoved();
+    TestReductionKeepsTopLevelMenus();
+    TestReductionMarksNoPart();
     std::cout << "All command line tests passed\n";
     return 0;
 }

@@ -448,6 +448,7 @@ static const LinkedCommand* FindWorkEnvironment(const std::vector<LinkedCommand>
 static CommandIndex Offer(std::vector<MenuNode>& bar, const CommandSource::CachedExport* names, MenuSource& live,
                           const std::vector<DynamicList>& lists, CommandIndex index) {
     if (names != nullptr) AttachNames(bar, names->bar);
+    ReduceToShownMenu(bar);
     size_t notSearchable = 0;
     const std::vector<LinkedCommand> linked = MenuLink::Link(bar, live, lists, &notSearchable);
     const LinkedCommand* workEnvironment = FindWorkEnvironment(linked);
