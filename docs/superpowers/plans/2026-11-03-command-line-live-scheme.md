@@ -19,7 +19,7 @@ stages:
 ## Global Constraints
 
 - All Global Constraints of the base plan apply, with these changes: commits end with the `Co-Authored-By` trailer of the model that writes the commit; the time-based staleness check is gone.
-- No Graphisoft `.bin` file and no personal or office scheme is committed (addendum 7, option C). Automated tests build synthetic `.bin` bytes in test code.
+- No Graphisoft `.bin` file and no user scheme is committed (addendum 7, option C). Automated tests build synthetic `.bin` bytes in test code.
 - The local real-file test takes its paths only from the environment variables `BAAZ_TEST_SCHEME_BIN` and `BAAZ_TEST_SCHEME_XML` (`;`-separated lists of equal length, pairs of the same state); unset → it prints `[SKIP] real scheme files not configured` and passes. No path is written into code or CMake.
 - Scheme marker: `6FCD168F-A26C-4547-AF9D-ED9A5FC54DD7` (first 512 bytes of a `.bin`; `componentType` of the XML `<Scheme>` root). Size cap: `kMaxInputBytes` (8 MB) for every file.
 - Observed `.bin` header: `57 57 78 56 34 12 05 00`. Any other header → unreadable.
@@ -34,7 +34,7 @@ stages:
 3. **A command added to a menu after the export** → not offered, counted, "Commands not searchable yet: N" hint. Test: Task 3b `TestUnnamedCommandIsCountedNotOffered`.
 4. **The scheme the active profile names is missing or unreadable while other `.bin` files are readable** (for example the standard scheme) → no commands, never another `.bin` (A1). Test: Task 3b `TestProfileSchemeUnreadableOffersNothing`.
 5. **Typing `lineal` and pressing Enter while a hint is shown** → runs *Lineal*, not the hint. Test: Task 3c `TestHintIsNeverDefaultSelection`.
-6. **An add-on menu whose commands are configured but not loaded** (CI Tools: 15 submenus in the `.bin`, 2 live) → removed before linking, the rest of the menu links. Test: Task 3b `TestAbsentAddOnItemsAreDropped`.
+6. **An add-on menu whose commands are configured but not loaded** (in one custom scheme: 15 submenus in the `.bin`, 2 live) → removed before linking, the rest of the menu links. Test: Task 3b `TestAbsentAddOnItemsAreDropped`.
 
 ---
 
@@ -51,7 +51,7 @@ stages:
 - Produces:
   ```cpp
   struct BinScheme {
-      std::string guid;                  // scheme GUID from the header, e.g. "2F4881B8-…"
+      std::string guid;                  // scheme GUID from the header, e.g. "AAAAAAAA-…"
       std::vector<MenuNode> floorPlanBar; // "Nicht-Text" bar; popup titles set, item names empty
   };
   class BinSchemeReader {
@@ -188,7 +188,7 @@ Decided by Dave: I-2 option A, I-1 option A (addendum sections 3 and 5 updated).
 
 ## Live-menu diagnosis fixes (2026-11-05, third fix wave)
 
-Decided by Dave: option A (addendum sections 3 and 5 updated). A trace of the live AC29 menu showed 271 of 787 office-scheme items lost for two reasons no export can cure.
+Decided by Dave: option A (addendum sections 3 and 5 updated). A trace of the live AC29 menu showed 271 of 787 custom-scheme items lost for two reasons no export can cure.
 - **R1** `MenuLink` (new `ReduceToShownMenu`, called after `AttachNames`, before linking, also without an export): inside each top-level menu, recursively remove `Item`s named exactly `(Empty)` (never placeholders), then popups with no `Item` or popup left, then leading, trailing and repeated separators. Top-level menus stay. No part-uncertain mark. Tests (real frame): `[A, (Empty), B]` against live `[A, B]` links A and B; a popup left empty disappears and the rest of its part links; `[A | | B]` and leading/trailing separators against `[A | B]` link; an `(Empty)` item that is shown after all leaves its part unlinked; removed items are not in *N*.
 - **R2** `MenuLevel::LinkSegments`: if the live part count equals head + tail and every catalogue part of the placeholder region holds only placeholders, pair head and tail as usual. Tests: `[A | P]` against `[A]`, `[A | P | B]` against `[A | B]`, `[A | P1 | P2 | B]` against `[A | B]` link; a region with a static entry, `[A | P, C | B]` against `[A | B]`, links nothing and is counted in *N*.
 

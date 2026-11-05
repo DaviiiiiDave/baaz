@@ -44,9 +44,9 @@ current, and takes only the item **names** from an export.
 - **Structure from the `.bin`.** The scheme `.bin` is a serialisation of the same tree as the
   XML export, without the localised item names. Observed (AC29 and AC30, read-only):
   - not compressed (about 3.4 bit/byte, no zlib stream); same 8-byte header
-    `57 57 78 56 34 12 05 00` in all three inspected files (AC29 office scheme, AC29 standard
+    `57 57 78 56 34 12 05 00` in all three inspected files (AC29 custom scheme, AC29 standard
     scheme, AC30 standard scheme);
-  - the scheme GUID as ASCII after the header (for example `2F4881B8-…` = the scheme the
+  - the scheme GUID as ASCII after the header (for example `AAAAAAAA-…` = the scheme the
     user's profile references), the scheme name and the menu titles as UTF-16; the titles are
     localised in the language Archicad runs in (German *Ablage, Bearbeiten, Ansicht, Planung,
     Dokumentation, Optionen, Fenster, Hilfe, Teamwork* found in all three files, standard and
@@ -68,15 +68,15 @@ current, and takes only the item **names** from an export.
   the MDID differs). An item whose id has no name in the export is **not offered**; it still
   counts for positions.
 - **Items of add-ons that are not loaded are removed first** (measured 2026-11-03, Archicad 29,
-  Dave's office scheme; decided by Dave, option A). The `.bin` keeps the configured layout,
+  a custom scheme; decided by Dave, option A). The `.bin` keeps the configured layout,
   including commands of add-ons that are not loaded. The live menu and the export leave those
-  commands out, and also a submenu that has nothing left: the add-on menu *CI Tools* has 15
+  commands out, and also a submenu that has nothing left: one add-on menu has 15
   submenus in the `.bin` and 2 in the live menu and in the export; the 13 hidden ones hold only
   commands whose MDID pair occurs nowhere in the export's floor-plan bar. Before linking, Baaz
   therefore removes from the `.bin` tree every `Item` with a non-zero MDID whose pair
   (MDID1, MDID2) occurs in no `Item` of the chosen export's floor-plan bar, and then every popup
   that had an `Item` or popup before this removal and has none left. Built-in commands (MDID 0)
-  are never removed; popups that were empty already stay. With this rule the office `.bin`
+  are never removed; popups that were empty already stay. With this rule the custom `.bin`
   equals its export in both bars; the standard scheme is unchanged.
 - **Uncertain add-on parts are not linked** (final review 2026-11-04, decided by Dave, option
   A). The export only tells which add-ons were loaded *when it was made*. If that changed since
@@ -97,18 +97,18 @@ current, and takes only the item **names** from an export.
   no export can make them linkable.
 - **The scheme is reduced to what Archicad shows** (diagnosis 2026-11-05 on the live AC29 menu,
   decided by Dave, option A). Without this, a scheme carried over several versions loses whole
-  popups: 271 of 787 items in the office scheme. Before linking, inside every top-level menu
+  popups: 271 of 787 items in the custom scheme. Before linking, inside every top-level menu
   (top-level menus themselves stay):
   - `Item`s the fitting export names exactly `(Empty)` are removed. The export writes this text,
     not translated, for commands this Archicad does not offer any more; the live menu does not
-    show them (87 such items in the office scheme, none in the standard scheme). Placeholders
+    show them (87 such items in the custom scheme, none in the standard scheme). Placeholders
     are never removed. Without an export this rule cannot apply.
   - Popups without any `Item` or popup left are removed; Archicad does not show them.
   - Leading, trailing and repeated separators are removed; Archicad does not show them.
   If an `(Empty)` item were shown after all, the count of a part without a placeholder differs
   and the part stays unlinked. Next to a placeholder the count cannot show that, so a part that
   holds a placeholder and lost an `(Empty)` item counts as uncertain and links nothing (Dave
-  2026-11-05; the office scheme has no such part, so this costs no command). The empty rest of a
+  2026-11-05; the custom scheme has no such part, so this costs no command). The empty rest of a
   part that lost everything to the add-on rule above goes too, so a new live part in its place
   falls under remaining risk (2) when a placeholder is near, else the part count differs and
   nothing links.
@@ -179,7 +179,7 @@ dann eine Mini-Anleitung"). Views, tools and everything else stay searchable as 
   Everything else stays uncounted and is simply not offered: items of uncertain parts (section 3),
   items of parts whose count differs, items Archicad shows only in some situations, placeholders,
   menus whose title is not in the live bar (for example *Apple*) and items removed in section 3.
-  Measured on the office scheme in a test project (2026-11-05): 691 commands offered, 37 in
+  Measured on the custom scheme in a test project (2026-11-05): 691 commands offered, 37 in
   uncertain parts, 23 of parts Archicad shows differently by situation (for example a popup for a
   device that is not connected, Teamwork commands in a solo project). A hint that no export can
   clear would teach users to ignore it. The cost is accepted: an add-on switched off in the
@@ -222,7 +222,7 @@ dann eine Mini-Anleitung"). Views, tools and everything else stay searchable as 
   repo.** The automated tests build synthetic `.bin` files in test code. In addition, one local
   test compares the reader against the real files on the developer's machine (a `.bin` and the
   XML export of the same state, AC29 and AC30); it is skipped, and says so, when those files are
-  not present (CI, other machines). Personal or office schemes are used only in that local test
+  not present (CI, other machines). User schemes are used only in that local test
   and in manual checks, never committed.
 - The undocumented format is a point for the upstream maintainer (in addition to R14/R17 noted
   in the Task 3 review); the PR text must say so.
