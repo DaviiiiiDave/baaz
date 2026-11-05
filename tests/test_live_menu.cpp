@@ -642,16 +642,16 @@ void TestNoExportAddOnPartLinksNoWorkEnvironment() {
     std::cout << "[PASS] TestNoExportAddOnPartLinksNoWorkEnvironment\n";
 }
 
-// A part whose item count changed links nothing; its commands are counted, not left out silently
-void TestCountMismatchPartIsCounted() {
+// A part whose item count changed links nothing, and a new export cannot change that, so it is not counted
+void TestCountMismatchPartIsNotCounted() {
     TestFrame frame(Fill::Normal);
     TestFolders folders;
     folders.WriteCurrent();
     frame.List({ 255, 0, 300, 402 });
     const CommandIndex index = IndexOf(frame.Hwnd());
     assert((Titles(index.commands) == std::vector<std::wstring>{ L"Alpha" }));
-    assert(index.state == CommandState::NewCommands && index.notSearchable == 1);
-    std::cout << "[PASS] TestCountMismatchPartIsCounted\n";
+    assert(index.state == CommandState::Ready && index.notSearchable == 0);
+    std::cout << "[PASS] TestCountMismatchPartIsNotCounted\n";
 }
 
 // --- Entries of the scheme that Archicad does not show ------------------------------------------
@@ -711,18 +711,30 @@ void TestSurplusSeparatorsLeaveTheMenuLinked() {
     std::cout << "[PASS] TestSurplusSeparatorsLeaveTheMenuLinked\n";
 }
 
-// [A, (Empty), B | C] against the live [A, Z, B | C]: the count differs, and the removed item is not counted
+// [A, (Empty), B | C] against the live [A, Z, B | C]: the count differs, so A and B stay unlinked and,
+// as no export can link them, uncounted
 void TestItemShownAfterAllLeavesItsPartUnlinked() {
     const CommandIndex index = IndexFor({ kA, kNotOffered, kB, kCut, kC }, { 201, 209, 202, 0, 203 });
     assert((Titles(index.commands) == std::vector<std::wstring>{ L"C" }) && (LiveIds(index.commands) == std::vector<unsigned>{ 203 }));
-    assert(index.state == CommandState::NewCommands && index.notSearchable == 2);
+    assert(index.state == CommandState::Ready && index.notSearchable == 0);
     std::cout << "[PASS] TestItemShownAfterAllLeavesItsPartUnlinked\n";
 }
 
-void TestRemovedEntriesDoNotMakeAPartUncertain() {
-    AssertLinksAll({ kA, kNotOffered, Item(kGraphicOverrides, 0, 0), kB, kCut, kC }, { 201, 801, 802, 202, 0, 203 },
+// A part with a placeholder that lost an "(Empty)" item is uncertain: the count cannot show whether that
+// item is shown after all. [(Empty), A, P] against the live [Z, A, e] would run Z for A.
+void TestItemNotShownNextToPlaceholderMakesItsPartUncertain() {
+    const CommandIndex index = IndexFor({ kNotOffered, kA, Item(kGraphicOverrides, 0, 0), kCut, kC }, { 209, 201, 801, 0, 203 });
+    assert((Titles(index.commands) == std::vector<std::wstring>{ L"C" }) && (LiveIds(index.commands) == std::vector<unsigned>{ 203 }));
+    assert(index.state == CommandState::Ready && index.notSearchable == 0);
+    // The same if the item sits between the others
+    const CommandIndex inside = IndexFor({ kA, kNotOffered, Item(kGraphicOverrides, 0, 0), kB, kCut, kC }, { 201, 801, 802, 202, 0, 203 });
+    assert((Titles(inside.commands) == std::vector<std::wstring>{ L"C" }) && (LiveIds(inside.commands) == std::vector<unsigned>{ 203 }));
+    // Without a placeholder the count decides, so the part still links
+    AssertLinksAll({ kNotOffered, kA, kB }, { 201, 202 }, kTitlesAB, { 201, 202 });
+    // A popup left empty is no lost item
+    AssertLinksAll({ Popup(Menu(L"H", L"Hidden", { kNotOffered })), kA, Item(kGraphicOverrides, 0, 0), kB, kCut, kC }, { 201, 801, 802, 202, 0, 203 },
                    kTitlesABC, { 201, 202, 203 });
-    std::cout << "[PASS] TestRemovedEntriesDoNotMakeAPartUncertain\n";
+    std::cout << "[PASS] TestItemNotShownNextToPlaceholderMakesItsPartUncertain\n";
 }
 
 // Popups and separators need no names: Work Environment is found before the first export
@@ -754,7 +766,7 @@ void TestVanishedPlaceholderPartLeavesTheOthersLinked() {
 // [A | P, C | B] against the live [A | B]: a static entry cannot vanish, so something else changed
 void TestRegionWithStaticEntryLinksNothingAround() {
     const int time = NextTime();
-    TestFrame frame(Fill::Normal, true);   // the menu Extra links, so the menu Test alone decides the count
+    TestFrame frame(Fill::Normal, true);   // the menu Extra links, so that something links at all
     TestFolders folders;
     folders.WriteExport(time, TestMenuXml(XmlItem(1, "A") + XmlItem(2, "B") + XmlItem(3, "C") + XmlItem(5, "Other")));
     folders.WriteBin(BinOf({ Menu(L"E", L"&Extra", { Item(5, 0, 0) }), Menu(L"M", L"&Test", { kA, kCut, kList, kC, kCut, kB }) }), time);
@@ -762,14 +774,14 @@ void TestRegionWithStaticEntryLinksNothingAround() {
     frame.List({ 201, 0, 202 });
     const CommandIndex index = IndexOf(frame.Hwnd());
     assert((Titles(index.commands) == std::vector<std::wstring>{ L"Other" }) && (LiveIds(index.commands) == std::vector<unsigned>{ 700 }));
-    assert(index.state == CommandState::NewCommands && index.notSearchable == 3);
+    assert(index.state == CommandState::Ready && index.notSearchable == 0);
     std::cout << "[PASS] TestRegionWithStaticEntryLinksNothingAround\n";
 }
 
 void TestPartNextToVanishedPartStillNeedsItsCount() {
     const CommandIndex index = IndexFor({ kA, kCut, kList, kCut, kB, kC }, { 201, 0, 202 });
     assert((Titles(index.commands) == std::vector<std::wstring>{ L"A" }) && (LiveIds(index.commands) == std::vector<unsigned>{ 201 }));
-    assert(index.state == CommandState::NewCommands && index.notSearchable == 2);
+    assert(index.state == CommandState::Ready && index.notSearchable == 0);
     std::cout << "[PASS] TestPartNextToVanishedPartStillNeedsItsCount\n";
 }
 
@@ -1134,12 +1146,12 @@ int main() {
     TestUncertainPartWithCountMismatchIsNotCounted();
     TestBuiltInPartAroundPlaceholderStillLinks();
     TestNoExportAddOnPartLinksNoWorkEnvironment();
-    TestCountMismatchPartIsCounted();
+    TestCountMismatchPartIsNotCounted();
     TestItemNotShownLeavesItsPartLinked();
     TestPopupLeftEmptyLeavesItsPartLinked();
     TestSurplusSeparatorsLeaveTheMenuLinked();
     TestItemShownAfterAllLeavesItsPartUnlinked();
-    TestRemovedEntriesDoNotMakeAPartUncertain();
+    TestItemNotShownNextToPlaceholderMakesItsPartUncertain();
     TestSchemeIsReducedWithoutAnExport();
     TestVanishedPlaceholderPartLeavesTheOthersLinked();
     TestRegionWithStaticEntryLinksNothingAround();

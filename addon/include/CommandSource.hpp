@@ -31,7 +31,7 @@ private:
 enum class CommandState {
     Ready,         // every linked command has a name
     NoExport,      // the scheme of the profile in use is usable, but no export that fits gives names: no commands
-    NewCommands,   // some menu commands are not offered for a reason a new export can fix: no name (added to the menus since), or a count that differs
+    NewCommands,   // some linked menu commands have no name (added to the menus since the export), so they are not offered; a new export names them
     Unreadable     // no commands: the profile or its scheme file is missing, ambiguous or not understood,
                    // or the scheme does not fit the live menu bar (with a fitting export: or links nothing)
 };
@@ -39,7 +39,7 @@ enum class CommandState {
 struct CommandIndex {
     std::vector<SearchItem> commands;   // named, linked commands only
     CommandState state = CommandState::Unreadable;
-    size_t notSearchable = 0;           // NewCommands: items a new export can make searchable (no name, or not linked because a count differs)
+    size_t notSearchable = 0;           // NewCommands: linked items without a name; a new export can name them
     SearchItem workEnvironment;         // kind Command, position of 7682; liveId 0 if not found
 };
 

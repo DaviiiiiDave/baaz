@@ -77,8 +77,7 @@ struct LinkRun {
     MenuSource& source;
     const std::vector<DynamicList>& lists;
     std::vector<LinkedCommand> commands;
-    size_t namedItems = 0;       // linked Items of the scheme that have a name
-    size_t uncertainItems = 0;   // Items (not placeholders) of the parts skipped as uncertain
+    size_t unnamedItems = 0;     // linked Items of the scheme that have no name
 };
 
 } // namespace
@@ -105,16 +104,6 @@ static bool IsUncertainPart(const std::vector<MenuNode>& catalogue, const Segmen
         if (node.partLostEntries || (node.type == MenuNodeType::Item && (node.mdid1 != 0 || node.mdid2 != 0))) return true;
     }
     return false;
-}
-
-// Items that are not placeholders, at any depth
-static size_t CountItems(std::vector<MenuNode>::const_iterator first, std::vector<MenuNode>::const_iterator last) {
-    size_t count = 0;
-    for (; first != last; ++first) {
-        if (first->type == MenuNodeType::Popup) count += CountItems(first->children.begin(), first->children.end());
-        else if (first->type == MenuNodeType::Item && !IsPlaceholder(*first)) ++count;
-    }
-    return count;
 }
 
 static void AddFromStart(std::vector<EntryPair>& pairs, const Segment& catalogue, const Segment& live, size_t count) {
@@ -215,11 +204,6 @@ private:
     }
 
     void PairSegment(const Segment& catalogue, const Segment& live) {
-        // An export cannot cure a skipped uncertain part, so its Items are not counted as not searchable
-        if (IsSkippedAsUncertain(catalogue)) {
-            m_run.uncertainItems += CountItems(m_catalogue.begin() + catalogue.begin, m_catalogue.begin() + catalogue.end);
-            return;
-        }
         std::vector<EntryPair> pairs = SegmentPairs(catalogue, live);
         for (const EntryPair& pair : pairs) {
             if (m_catalogue[pair.catalogue].type != m_live[pair.live].type) return;
@@ -227,13 +211,11 @@ private:
         m_pairs.insert(m_pairs.end(), pairs.begin(), pairs.end());
     }
 
-    bool IsSkippedAsUncertain(const Segment& catalogue) const {
-        return FindPlaceholders(catalogue).count > 0 && IsUncertainPart(m_catalogue, catalogue);
-    }
-
     std::vector<EntryPair> SegmentPairs(const Segment& catalogue, const Segment& live) const {
         std::vector<EntryPair> pairs;
         const PlaceholderSpan span = FindPlaceholders(catalogue);
+        // A skipped uncertain part links nothing, whatever the live count
+        if (span.count > 0 && IsUncertainPart(m_catalogue, catalogue)) return pairs;
         // One placeholder cannot change the count unless it became exactly one entry. With two,
         // one may have grown while the other vanished, so only the entries at the ends are sure.
         if (catalogue.size() == live.size() && span.count <= 1) {
@@ -294,7 +276,7 @@ private:
             if (node.type == MenuNodeType::Popup) {
                 MenuLevel(m_run, node.children, Position(pair.live), m_menuPath + kPathSeparator + node.name).Link();
             } else if (!IsPlaceholder(node)) {
-                if (!node.name.empty()) ++m_run.namedItems;
+                if (node.name.empty()) ++m_run.unnamedItems;
                 LinkedCommand command = MakeCommand(node.name, pair.live);
                 command.commandNumber = node.commandNumber;
                 command.mdid1 = node.mdid1;
@@ -356,15 +338,13 @@ static bool LinkBar(const std::vector<MenuNode>& bar, MenuSource& live, const st
     std::vector<MatchedMenu> matched;
     if (!MatchMenus(bar, live.TopLevelTitles(), matched)) return false;
     LinkRun run{ live, lists, {} };
-    size_t items = 0;
     for (const MatchedMenu& menu : matched) {
         MenuLevel(run, bar[menu.catalogue].children, { static_cast<int>(menu.live) }, bar[menu.catalogue].name).Link();
-        items += CountItems(bar[menu.catalogue].children.begin(), bar[menu.catalogue].children.end());
     }
     std::sort(run.commands.begin(), run.commands.end(),
               [](const LinkedCommand& a, const LinkedCommand& b) { return a.position < b.position; });
     linked = std::move(run.commands);
-    notSearchable = items - run.namedItems - run.uncertainItems;
+    notSearchable = run.unnamedItems;
     return true;
 }
 
@@ -464,19 +444,37 @@ void AttachNames(std::vector<MenuNode>& bar, const std::vector<MenuNode>& export
 // Not translated: the export writes this text for a command this Archicad no longer offers
 static const wchar_t* const kNotOfferedName = L"(Empty)";
 
-static bool IsNotShown(const MenuNode& node) {
-    if (node.type == MenuNodeType::Popup) return !HoldsItemOrPopup(node.children);
+static bool IsNotOfferedItem(const MenuNode& node) {
     return node.type == MenuNodeType::Item && node.name == kNotOfferedName && !IsPlaceholder(node);
 }
 
+static bool IsNotShown(const MenuNode& node) {
+    if (node.type == MenuNodeType::Popup) return !HoldsItemOrPopup(node.children);
+    return IsNotOfferedItem(node);
+}
+
+// The parts are those between the separators of the scheme as it was; a part that lost an Item is marked
+// before surplus separators go, so a mark stays in its own part. A popup removed alone marks nothing.
 static void ReduceEntries(std::vector<MenuNode>& nodes) {
     std::vector<MenuNode> kept;
+    size_t partBegin = 0;
+    bool partLost = false;
     for (MenuNode& node : nodes) {
         ReduceEntries(node.children);
-        if (IsNotShown(node)) continue;
-        const bool surplusSeparator = node.type == MenuNodeType::Separator && (kept.empty() || kept.back().type == MenuNodeType::Separator);
+        if (IsNotShown(node)) {
+            partLost = partLost || IsNotOfferedItem(node);
+            continue;
+        }
+        const bool isSeparator = node.type == MenuNodeType::Separator;
+        if (isSeparator) {
+            MarkPart(kept, partBegin, partLost);
+            partLost = false;
+        }
+        const bool surplusSeparator = isSeparator && (kept.empty() || kept.back().type == MenuNodeType::Separator);
         if (!surplusSeparator) kept.push_back(std::move(node));
+        if (isSeparator) partBegin = kept.size();
     }
+    MarkPart(kept, partBegin, partLost);
     if (!kept.empty() && kept.back().type == MenuNodeType::Separator) kept.pop_back();
     nodes = std::move(kept);
 }

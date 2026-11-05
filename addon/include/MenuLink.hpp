@@ -50,19 +50,24 @@ public:
     // callers re-checking the live entry before running it.
     // The add-ons loaded now may differ from those of the export, so a part (the entries between two
     // separators) with a placeholder links nothing if it holds an Item with a non-zero MDID or lost an
-    // entry to DropAbsentAddOnItems. Remaining risks, both accepted and not observed in Archicad:
+    // entry to DropAbsentAddOnItems or an "(Empty)" Item to ReduceToShownMenu. Remaining risks, all
+    // accepted and not observed in Archicad:
     // - in a part without a placeholder, one add-on item that left since the export and another that
     //   came at the same position keep the count equal;
     // - around a placeholder region whole parts are anchored by position, so a new live part the
     //   scheme does not hold (e.g. an add-on's own part after a separator at the end of a menu) can
     //   take the place of the last scheme part, whose commands then run the new part's entries; the
-    //   same goes for a new part where ReduceToShownMenu removed the empty rest of a part.
-    // notSearchable, if given: the Items (not placeholders) of the top-level menus whose title matched,
-    // at any depth, that a new export can make searchable: linked without a name, or not linked
-    // because a count differs (a part, a popup, the parts around a placeholder region, a menu whose
-    // parts do not match). Not counted: the Items of a part skipped as uncertain (see above), also
-    // when its count differs as well, placeholders, menus not in the live bar, items removed by
-    // DropAbsentAddOnItems or ReduceToShownMenu.
+    //   same goes for a new part where ReduceToShownMenu removed the empty rest of a part;
+    // - a static part hidden next to a region of placeholders while the list holds exactly as many
+    //   entries as that part: the live menu then looks like the scheme with an empty list, and the
+    //   static commands link to the list entries ([A | P | B] against the live [A | e] links B to e).
+    //   The re-check before running cannot catch it, as the live entry is an enabled Item with the
+    //   same id.
+    // notSearchable, if given: the number of linked Items (not placeholders) without a name, at any
+    // depth, in the top-level menus whose title matched; a new export can name them. Everything that
+    // is not linked is not counted, whatever the reason, because a new export cannot link it: parts
+    // skipped as uncertain, parts, popups or menus whose count or titles do not match, placeholders,
+    // items removed by DropAbsentAddOnItems or ReduceToShownMenu.
     static std::vector<LinkedCommand> Link(const std::vector<MenuNode>& bar, MenuSource& live,
                                            const std::vector<DynamicList>& lists, size_t* notSearchable = nullptr);
     // -1 if no top-level menu has a title in common with the live bar, or the common ones are in
@@ -82,7 +87,10 @@ void AttachNames(std::vector<MenuNode>& bar, const std::vector<MenuNode>& export
 // Removes from inside every top-level menu, at any depth, what Archicad does not show: Items named "(Empty)"
 // that are not placeholders (the text the export writes for commands this Archicad no longer offers), then
 // Popups with no Item or Popup left, then leading, trailing and repeated separators. The top-level menus
-// stay. No part gets partLostEntries: these entries are not in the live menu, whatever add-ons are loaded.
+// stay. A part (the entries between two separators of the scheme as it was) that lost an "(Empty)" Item gets
+// partLostEntries on the entries it keeps, as in DropAbsentAddOnItems: if the Item is shown after all, next
+// to a placeholder the count cannot show it. A popup removed alone marks nothing, nor does a part that
+// vanishes completely.
 void ReduceToShownMenu(std::vector<MenuNode>& bar);
 
 } // namespace Baaz

@@ -763,6 +763,32 @@ void TestNewLivePartTakesPlaceOfLastSchemePart() {
     std::cout << "[PASS] TestNewLivePartTakesPlaceOfLastSchemePart\n";
 }
 
+// PINNED ACCEPTED RISK: this documents today's behaviour, it does not endorse it. If Archicad hides the
+// static part B next to the region of placeholders while the list holds exactly as many entries as B,
+// the live menu [A | e] looks like [A | B] with an empty list, and B links to the list entry e. Not
+// observed in Archicad; the run-time re-check cannot catch it; see MenuLink.hpp.
+void TestHiddenStaticPartNextToPlaceholderRegionLinksToTheList() {
+    auto commands = LinkOne(ListMenu(), { 1, S, 10 });
+    assert((LinkedNames(commands) == std::vector<std::wstring>{ L"A", L"B" }));
+    assert((LinkedIds(commands) == std::vector<unsigned>{ 1, 10 }));   // B runs e
+    std::cout << "[PASS] TestHiddenStaticPartNextToPlaceholderRegionLinksToTheList\n";
+}
+
+// N counts the linked Items without a name and nothing else: an unnamed Item in a part that does not link
+// is not counted, since a new export cannot link it
+void TestOnlyLinkedUnnamedItemsAreCounted() {
+    std::vector<MenuNode> bar = OneMenu({ ItemNode(L"A", 11), ItemNode(L"", 12), SeparatorNode(), ItemNode(L"", 13), ItemNode(L"", 14) });
+    FakeMenu live = OneLive({ 1, 2, S, 3 });   // the second part has one entry too few
+    size_t notSearchable = 99;
+    const auto commands = MenuLink::Link(bar, live, {}, &notSearchable);
+    assert((LinkedIds(commands) == std::vector<unsigned>{ 1, 2 }));
+    assert(notSearchable == 1);
+    FakeMenu matching = OneLive({ 1, 2, S, 3, 4 });
+    MenuLink::Link(bar, matching, {}, &notSearchable);
+    assert(notSearchable == 3);
+    std::cout << "[PASS] TestOnlyLinkedUnnamedItemsAreCounted\n";
+}
+
 void TestFitScoreRejectsOtherLanguage() {
     auto bar = SchemeReader::ReadFloorPlanMenuBar(ReadFixture());
     FakeMenu live({ L"View", L"Document" });
@@ -1275,12 +1301,53 @@ void TestReductionKeepsTopLevelMenus() {
     std::cout << "[PASS] TestReductionKeepsTopLevelMenus\n";
 }
 
-void TestReductionMarksNoPart() {
-    std::vector<MenuNode> bar = OneMenu({ ItemNode(L"a", 10), ItemNode(L"(Empty)", 20), PopupNode(L"Empty", {}), SeparatorNode(), ItemNode(L"b", 11) });
+static std::wstring MarkedParts(const std::vector<MenuNode>& nodes) {
+    std::wstring marks;
+    for (const MenuNode& node : nodes) marks += node.partLostEntries ? L'x' : L'-';
+    return marks;
+}
+
+// A part that lost an "(Empty)" Item may have shifted under the add-ons loaded now, like a part that lost an
+// add-on item: its entries are marked, the separators and the other parts are not
+void TestReductionMarksPartThatLostAnItem() {
+    std::vector<MenuNode> bar = OneMenu({ ItemNode(L"a", 10), ItemNode(L"(Empty)", 20), ItemNode(L"b", 11), SeparatorNode(),
+                                          ItemNode(L"c", 12), SeparatorNode(), ItemNode(L"d", 13), ItemNode(L"(Empty)", 21) });
+    ReduceToShownMenu(bar);
+    assert(DumpAll(bar) == L"P:M[I:a#10,I:b#11,S,I:c#12,S,I:d#13]");
+    assert(MarkedParts(bar[0].children) == L"xx---x");
+    std::cout << "[PASS] TestReductionMarksPartThatLostAnItem\n";
+}
+
+// Parts are the original ones: surplus separators go after the marking, so a mark never lands in the next part
+void TestReductionMarksByOriginalParts() {
+    std::vector<MenuNode> bar = OneMenu({ ItemNode(L"a", 10), SeparatorNode(), ItemNode(L"(Empty)", 20), SeparatorNode(), ItemNode(L"b", 11),
+                                          SeparatorNode(), SeparatorNode(), ItemNode(L"c", 12), ItemNode(L"(Empty)", 21), SeparatorNode(),
+                                          ItemNode(L"(Empty)", 22), SeparatorNode(), ItemNode(L"d", 13) });
+    ReduceToShownMenu(bar);
+    assert(DumpAll(bar) == L"P:M[I:a#10,S,I:b#11,S,I:c#12,S,I:d#13]");
+    assert(MarkedParts(bar[0].children) == L"----x--");
+    std::cout << "[PASS] TestReductionMarksByOriginalParts\n";
+}
+
+// Removing an empty popup, or a part that vanishes with its separators, marks nothing
+void TestReductionMarksNothingForAnEmptyPopup() {
+    std::vector<MenuNode> bar = OneMenu({ ItemNode(L"a", 10), PopupNode(L"Empty", {}), SeparatorNode(), ItemNode(L"b", 11) });
     ReduceToShownMenu(bar);
     assert(DumpAll(bar) == L"P:M[I:a#10,S,I:b#11]");
-    for (const MenuNode& node : bar[0].children) assert(!node.partLostEntries);
-    std::cout << "[PASS] TestReductionMarksNoPart\n";
+    assert(MarkedParts(bar[0].children) == L"---");
+    std::cout << "[PASS] TestReductionMarksNothingForAnEmptyPopup\n";
+}
+
+// Each level has its own parts: the inner part that lost an item is marked, the popup and its neighbours are not
+void TestReductionMarksPerLevel() {
+    std::vector<MenuNode> bar = OneMenu({ ItemNode(L"a", 10),
+                                          PopupNode(L"Sub", { ItemNode(L"x", 11), ItemNode(L"(Empty)", 20), SeparatorNode(), ItemNode(L"y", 12) }),
+                                          ItemNode(L"b", 13) });
+    ReduceToShownMenu(bar);
+    assert(DumpAll(bar) == L"P:M[I:a#10,P:Sub[I:x#11,S,I:y#12],I:b#13]");
+    assert(MarkedParts(bar[0].children) == L"---");
+    assert(MarkedParts(bar[0].children[1].children) == L"x--");
+    std::cout << "[PASS] TestReductionMarksPerLevel\n";
 }
 
 int main() {
@@ -1314,6 +1381,8 @@ int main() {
     TestListWithoutRegisteredPlaceholderStaysUnlinked();
     TestListNeedsOnlyItems();
     TestNewLivePartTakesPlaceOfLastSchemePart();
+    TestHiddenStaticPartNextToPlaceholderRegionLinksToTheList();
+    TestOnlyLinkedUnnamedItemsAreCounted();
     TestFitScoreRejectsOtherLanguage();
     TestFitScoreCountsLinks();
     TestTopLevelFitRules();
@@ -1351,7 +1420,10 @@ int main() {
     TestPopupsWithoutEntriesAreRemoved();
     TestSurplusSeparatorsAreRemoved();
     TestReductionKeepsTopLevelMenus();
-    TestReductionMarksNoPart();
+    TestReductionMarksPartThatLostAnItem();
+    TestReductionMarksByOriginalParts();
+    TestReductionMarksNothingForAnEmptyPopup();
+    TestReductionMarksPerLevel();
     std::cout << "All command line tests passed\n";
     return 0;
 }
