@@ -4,7 +4,8 @@
 
 namespace Baaz {
 
-// Marks the Space key events Baaz synthesizes for Magic Wand so the hook lets them through
+// Marks the Space key events and the click Baaz synthesizes for Magic Wand. The hook lets the key
+// events through on this mark; the replayed click passes because the hold is already confirmed.
 static const ULONG_PTR SENTINEL_MAGIC_WAND = 0x53504143;
 
 // Thread hooks on Archicad's UI thread: Space tap opens the HUD, Space hold
