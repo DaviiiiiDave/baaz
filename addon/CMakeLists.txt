@@ -1,4 +1,4 @@
-# Baaz.apx, the Archicad 30 add-on
+# Baaz.apx, the Archicad add-on (version: BAAZ_AC_VERSION)
 
 set(DEVKIT "${ARCHICAD_DEVKIT_DIR}/Support")
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
@@ -33,7 +33,7 @@ add_custom_command(
     ${RES_STAGE_COMMANDS}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${RES_OBJECTS}
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/CompileResources.py
-            INT 30 ${ARCHICAD_DEVKIT_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/src ${RES_STAGE} ${RES_OBJECTS} ${RES_FILE}
+            INT ${BAAZ_AC_VERSION} ${ARCHICAD_DEVKIT_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/src ${RES_STAGE} ${RES_OBJECTS} ${RES_FILE}
     COMMAND ${CMAKE_COMMAND} -E touch ${RES_STAMP}
     DEPENDS ${RES_SOURCES} ${CMAKE_SOURCE_DIR}/tools/CompileResources.py
     COMMENT "Compiling Archicad resources"
@@ -64,7 +64,7 @@ target_compile_definitions(Baaz PRIVATE
     _ITERATOR_DEBUG_LEVEL=0
     ACExtension
     WINDOWS
-    ACAPI_VERSION=30
+    ACAPI_VERSION=${BAAZ_AC_VERSION}
 )
 
 target_link_libraries(Baaz PRIVATE

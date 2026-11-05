@@ -25,9 +25,11 @@ HWND MainWindow() { return g_frame; }
 static std::vector<INPUT> g_sent;
 static std::vector<MSG> g_delivered;
 static std::vector<unsigned> g_commands;
+static int g_clicksDelivered = 0;
 static int g_failures = 0;
 static HWND g_main = NULL;
 static HWND g_edit = NULL;
+static HWND g_dgRichEdit = NULL;
 
 UINT WINAPI TestSendInput(UINT cInputs, LPINPUT pInputs, int /*cbSize*/) {
     for (UINT i = 0; i < cInputs; ++i) g_sent.push_back(pInputs[i]);
@@ -52,6 +54,7 @@ static void Pump(bool peekFirst) {
         if (!PeekMessageW(&m, NULL, 0, 0, PM_REMOVE)) break;
         if (m.message == WM_KEYDOWN || m.message == WM_KEYUP) g_delivered.push_back(m);
         if (m.message == WM_COMMAND && m.hwnd == g_main) g_commands.push_back(LOWORD(m.wParam));
+        if (m.message == WM_LBUTTONDOWN || m.message == WM_RBUTTONDOWN) ++g_clicksDelivered;
         DispatchMessageW(&m);
     }
 }
@@ -117,6 +120,7 @@ static void Reset() {
     g_sent.clear();
     g_delivered.clear();
     g_commands.clear();
+    g_clicksDelivered = 0;
 }
 
 static void Run(const char* name, void (*test)(bool), bool peekFirst) {
@@ -183,8 +187,109 @@ static void ClickDuringHoldEngagesWandAtOnce(bool peek) {
     CHECK(!HudWindow::IsVisible());
 }
 
+// Archicad 29 takes Space from its own key message, so the click it modifies
+// must arrive after Space: the original click is withheld and replayed behind it.
+static void ClickIsReplayedAfterSpace(bool peek, UINT clickMsg, DWORD mouseFlag) {
+    Key(WM_KEYDOWN, VK_SPACE, peek);
+    PostMessageW(g_main, clickMsg, MK_LBUTTON, MAKELPARAM(10, 10));
+    Pump(peek);
+    CHECK(g_clicksDelivered == 0);
+    CHECK(g_sent.size() == 2);
+    if (g_sent.size() == 2) {
+        CHECK(g_sent[0].type == INPUT_KEYBOARD && g_sent[0].ki.wVk == VK_SPACE);
+        CHECK(g_sent[1].type == INPUT_MOUSE && (g_sent[1].mi.dwFlags & mouseFlag) != 0);
+        CHECK(g_sent[1].mi.dwExtraInfo == SENTINEL_MAGIC_WAND);
+    }
+    Key(WM_KEYUP, VK_SPACE, peek);
+}
+
+static void LeftClickIsReplayedAfterSpace(bool peek) {
+    ClickIsReplayedAfterSpace(peek, WM_LBUTTONDOWN, MOUSEEVENTF_LEFTDOWN);
+}
+
+static void RightClickIsReplayedAfterSpace(bool peek) {
+    ClickIsReplayedAfterSpace(peek, WM_RBUTTONDOWN, MOUSEEVENTF_RIGHTDOWN);
+}
+
+// A click while Space is not held belongs to Archicad: it must neither be withheld nor replayed.
+// Both buttons in one test: a withheld click leaves hook state behind, so a second test would not be independent.
+static void PlainClicksAreDelivered(bool peek) {
+    PostMessageW(g_main, WM_LBUTTONDOWN, 0, MAKELPARAM(10, 10));
+    Pump(peek);
+    CHECK(g_clicksDelivered == 1);
+    PostMessageW(g_main, WM_RBUTTONDOWN, 0, MAKELPARAM(10, 10));
+    Pump(peek);
+    CHECK(g_clicksDelivered == 2);
+    CHECK(g_sent.empty());
+    CHECK(!HudWindow::IsVisible());
+}
+
+static void PostClick(bool peek) {
+    PostMessageW(g_main, WM_LBUTTONDOWN, 0, MAKELPARAM(10, 10));
+    Pump(peek);
+}
+
+// Space is over once it was tapped, held, or used with a click: a later click must not be withheld.
+static void ClickAfterTapAndEscapeIsDelivered(bool peek) {
+    Tap(VK_SPACE, peek);
+    Tap(VK_ESCAPE, peek);
+    CHECK(!HudWindow::IsVisible());
+    PostClick(peek);
+    CHECK(g_clicksDelivered == 1);
+    CHECK(g_sent.empty());
+}
+
+static void ClickAfterHoldIsDelivered(bool peek) {
+    Key(WM_KEYDOWN, VK_SPACE, peek);
+    PumpFor(450, peek);
+    Key(WM_KEYUP, VK_SPACE, peek);
+    const size_t before = g_sent.size();
+    PostClick(peek);
+    CHECK(g_clicksDelivered == 1);
+    CHECK(g_sent.size() == before);
+}
+
+static void ClickAfterReplayedClickIsDelivered(bool peek) {
+    Key(WM_KEYDOWN, VK_SPACE, peek);
+    PostClick(peek);
+    Key(WM_KEYUP, VK_SPACE, peek);
+    CHECK(g_clicksDelivered == 0);
+    const size_t before = g_sent.size();
+    PostClick(peek);
+    CHECK(g_clicksDelivered == 1);
+    CHECK(g_sent.size() == before);
+}
+
+// The replayed click passes the hook again: with Space still held it must not be withheld a second time.
+static void ReplayedClickIsNotWithheldAgain(bool peek, UINT clickMsg) {
+    Key(WM_KEYDOWN, VK_SPACE, peek);
+    PostMessageW(g_main, clickMsg, 0, MAKELPARAM(10, 10));
+    Pump(peek);
+    CHECK(g_clicksDelivered == 0);
+    CHECK(g_sent.size() == 2);
+    PostMessageW(g_main, clickMsg, 0, MAKELPARAM(10, 10));  // stands in for the replayed click
+    Pump(peek);
+    CHECK(g_clicksDelivered == 1);
+    CHECK(g_sent.size() == 2);
+    Key(WM_KEYUP, VK_SPACE, peek);
+}
+
+static void ReplayedLeftClickIsNotWithheldAgain(bool peek) { ReplayedClickIsNotWithheldAgain(peek, WM_LBUTTONDOWN); }
+
+static void ReplayedRightClickIsNotWithheldAgain(bool peek) { ReplayedClickIsNotWithheldAgain(peek, WM_RBUTTONDOWN); }
+
 static void TextFieldGetsTheSpace(bool peek) {
     SetFocus(g_edit);
+    Tap(VK_SPACE, peek);
+    CHECK(!HudWindow::IsVisible());
+    CHECK(DeliveredSpaces() == 2);
+    PumpFor(450, peek);
+    CHECK(WandPresses() == 0);
+}
+
+// Archicad's text editor on the plan is a DG rich edit, not a Win32 Edit
+static void DgRichEditKeepsTheSpace(bool peek) {
+    SetFocus(g_dgRichEdit);
     Tap(VK_SPACE, peek);
     CHECK(!HudWindow::IsVisible());
     CHECK(DeliveredSpaces() == 2);
@@ -505,6 +610,12 @@ int main() {
     g_main = CreateWindowExW(0, wc.lpszClassName, L"Archicad 30 (hook test)", WS_OVERLAPPEDWINDOW,
                              -2000, -2000, 400, 300, NULL, NULL, hInst, NULL);
     g_edit = CreateWindowExW(0, L"Edit", L"", WS_CHILD | WS_VISIBLE, 0, 0, 100, 20, g_main, NULL, hInst, NULL);
+    WNDCLASSW dgClass = {};
+    dgClass.lpfnWndProc = DefWindowProcW;
+    dgClass.hInstance = hInst;
+    dgClass.lpszClassName = L"DGUniRichEditClass";
+    RegisterClassW(&dgClass);
+    g_dgRichEdit = CreateWindowExW(0, dgClass.lpszClassName, L"", WS_CHILD | WS_VISIBLE, 0, 30, 100, 20, g_main, NULL, hInst, NULL);
     ShowWindow(g_main, SW_SHOWNOACTIVATE);
 
     SearchEngine::Initialize();
@@ -521,7 +632,16 @@ int main() {
         Run("Hold engages Magic Wand", HoldEngagesMagicWand, peek);
         Run("Tap just under hold time", TapJustUnderHoldTime, peek);
         Run("Click during hold engages wand at once", ClickDuringHoldEngagesWandAtOnce, peek);
+        Run("Left click during hold is replayed after Space", LeftClickIsReplayedAfterSpace, peek);
+        Run("Right click during hold is replayed after Space", RightClickIsReplayedAfterSpace, peek);
+        Run("Clicks without Space are delivered", PlainClicksAreDelivered, peek);
+        Run("A click after tap and Escape is delivered", ClickAfterTapAndEscapeIsDelivered, peek);
+        Run("A click after a hold is delivered", ClickAfterHoldIsDelivered, peek);
+        Run("A click after a replayed click is delivered", ClickAfterReplayedClickIsDelivered, peek);
+        Run("A replayed left click is not withheld again", ReplayedLeftClickIsNotWithheldAgain, peek);
+        Run("A replayed right click is not withheld again", ReplayedRightClickIsNotWithheldAgain, peek);
         Run("Text field keeps the space", TextFieldGetsTheSpace, peek);
+        Run("DG rich edit keeps the space", DgRichEditKeepsTheSpace, peek);
         Run("Modal dialog keeps the space", ModalDialogGetsTheSpace, peek);
         Run("Lost keyup, then tap", LostKeyUpThenTap, peek);
         Run("Typing does not double letters", TypingDoesNotDoubleLetters, peek);
