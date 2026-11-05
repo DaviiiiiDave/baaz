@@ -176,11 +176,20 @@ private:
         }
         const size_t head = first;
         const size_t tail = count - 1 - last;
-        // The region needs at least one live segment, or the two ends overlap
-        if (m_liveSegments.size() < head + tail + 1) return;
+        // A region of placeholders alone vanishes with its separators when its lists are empty. A static
+        // entry cannot vanish, and with fewer live segments the two ends overlap.
+        const bool regionVanished = m_liveSegments.size() == head + tail && HoldsOnlyPlaceholders(first, last);
+        if (m_liveSegments.size() < head + tail + 1 && !regionVanished) return;
         PairRun(0, 0, head);
         PairRun(count - tail, m_liveSegments.size() - tail, tail);
-        LinkRegion(first, last, head, m_liveSegments.size() - head - tail);
+        if (!regionVanished) LinkRegion(first, last, head, m_liveSegments.size() - head - tail);
+    }
+
+    bool HoldsOnlyPlaceholders(size_t first, size_t last) const {
+        for (size_t i = first; i <= last; ++i) {
+            if (FindPlaceholders(m_catalogueSegments[i]).count != m_catalogueSegments[i].size()) return false;
+        }
+        return true;
     }
 
     void LinkRegion(size_t first, size_t last, size_t liveFirst, size_t liveCount) {

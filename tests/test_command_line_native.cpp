@@ -971,11 +971,12 @@ void TestPlaceholderIsNeverOffered() {
     std::cout << "[PASS] TestPlaceholderIsNeverOffered\n";
 }
 
-void TestPlaceholderSegmentGoneLinksNothing() {
-    // The whole segment of the placeholder is missing, so neither separator can be told from the other
-    assert(LinkOne(ListMenu(), { 1, S, 2 }).empty());
+void TestPlaceholderSegmentVanishes() {
+    // A list that is empty takes its segment and one separator with it
+    assert((LinkedIds(LinkOne(ListMenu(), { 1, S, 2 })) == std::vector<unsigned>{ 1, 2 }));
+    // With the other separator gone as well, the two ends cannot be told apart
     assert(LinkOne(ListMenu(), { 1, 2 }).empty());
-    std::cout << "[PASS] TestPlaceholderSegmentGoneLinksNothing\n";
+    std::cout << "[PASS] TestPlaceholderSegmentVanishes\n";
 }
 
 void TestPlaceholderRegionSizeMismatch() {
@@ -1214,6 +1215,19 @@ void TestUncertainPartAroundPlaceholderLinksNothing() {
     std::cout << "[PASS] TestUncertainPartAroundPlaceholderLinksNothing\n";
 }
 
+// The add-on of Y is not loaded and the list is empty, so nothing of the part is left in the live menu;
+// whether the add-on came back shows in the live part count. An add-on item that stays is a static entry.
+void TestPlaceholderPartWithAddOnEntries() {
+    std::vector<MenuNode> bar = OneMenu({ ItemNode(L"A", 11), SeparatorNode(), AddOnNode(L"Y", 9, 1, 2),
+                                          ItemNode(L"P", kGraphicOverridePlaceholder), SeparatorNode(), ItemNode(L"B", 12) });
+    DropAbsentAddOnItems(bar, ExportOfOneAddOn());
+    FakeMenu live = OneLive({ 1, S, 2 });
+    assert((LinkedIds(MenuLink::Link(bar, live, {})) == std::vector<unsigned>{ 1, 2 }));
+    assert(LinkOne({ ItemNode(L"A", 11), SeparatorNode(), AddOnNode(L"Y", 9, 1, 2), ItemNode(L"P", kGraphicOverridePlaceholder),
+                     SeparatorNode(), ItemNode(L"B", 12) }, { 1, S, 2 }).empty());
+    std::cout << "[PASS] TestPlaceholderPartWithAddOnEntries\n";
+}
+
 void TestItemsNamedEmptyAreRemoved() {
     std::vector<MenuNode> bar = OneMenu({ ItemNode(L"a", 10), ItemNode(L"(Empty)", 20), AddOnNode(L"(Empty)", 21, 7, 8),
                                           PopupNode(L"Sub", { ItemNode(L"(Empty)", 22), ItemNode(L"b", 11) }) });
@@ -1317,7 +1331,7 @@ int main() {
     TestOnePlaceholderEqualCount();
     TestTwoPlaceholdersInOneSegment();
     TestPlaceholderIsNeverOffered();
-    TestPlaceholderSegmentGoneLinksNothing();
+    TestPlaceholderSegmentVanishes();
     TestPlaceholderRegionSizeMismatch();
     TestDynamicItemIsNeverOffered();
     TestAnsichtExactLinkSet();
@@ -1331,6 +1345,7 @@ int main() {
     TestPlaceholdersAreKeyedByFullId();
     TestDroppedEntriesMarkTheirPart();
     TestUncertainPartAroundPlaceholderLinksNothing();
+    TestPlaceholderPartWithAddOnEntries();
     TestItemsNamedEmptyAreRemoved();
     TestPlaceholdersNamedEmptyStay();
     TestPopupsWithoutEntriesAreRemoved();

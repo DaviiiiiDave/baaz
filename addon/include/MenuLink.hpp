@@ -45,8 +45,9 @@ class MenuLink {
 public:
     // Assumes equal item counts mean the same items in the same order. A placeholder may expand to
     // any number of live entries, so anchoring around it cannot tell an expanded placeholder from
-    // an unexplained extra entry or a missing static item. This relies on a scheme that is as
-    // current as the live menu and on callers re-checking the live entry before running it.
+    // an unexplained extra entry or a missing static item. A part of placeholders alone may vanish
+    // with its separator. This relies on a scheme that is as current as the live menu and on
+    // callers re-checking the live entry before running it.
     // The add-ons loaded now may differ from those of the export, so a part (the entries between two
     // separators) with a placeholder links nothing if it holds an Item with a non-zero MDID or lost an
     // entry to DropAbsentAddOnItems. Remaining risks, both accepted and not observed in Archicad:
