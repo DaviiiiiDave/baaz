@@ -345,7 +345,7 @@ void HudWindow::MoveUp() {
     }
 }
 
-// Down and Tab on the hint row go back to the results; true if the key was used for that
+// Down and Tab on the hint row go back to the results, if there are any; true if the hint row was selected
 bool HudWindow::LeaveHint() {
     if (!s_hintSelected) return false;
     if (!s_results.empty()) {

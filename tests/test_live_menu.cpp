@@ -332,6 +332,17 @@ void TestRunRefusesChangedId() {
     std::cout << "[PASS] TestRunRefusesChangedId\n";
 }
 
+// WM_COMMAND carries 16 bits: a longer id would arrive as another command
+void TestRunRefusesIdLongerThanACommand() {
+    const unsigned tooLong = 0x10000 + 255;
+    TestFrame frame(Fill::Normal);
+    frame.List({ tooLong });
+    assert(!CommandSource::Run(CommandItem(tooLong, { 0, 0 }), frame.Hwnd()));
+    Pump();
+    assert(g_commands.empty());
+    std::cout << "[PASS] TestRunRefusesIdLongerThanACommand\n";
+}
+
 void TestRunRefusesWrongKindOrPosition() {
     TestFrame frame(Fill::Normal);
     SearchItem notACommand = CommandItem(255, { 0, 0 });
@@ -703,6 +714,14 @@ void TestPopupLeftEmptyLeavesItsPartLinked() {
     const std::string inner = Popup(Menu(L"I", L"Inner", { kNotOffered }));
     AssertLinksAll({ kA, Popup(Menu(L"H", L"Hidden", { inner, kCut })), kB }, { 201, 202 }, kTitlesAB, { 201, 202 });
     std::cout << "[PASS] TestPopupLeftEmptyLeavesItsPartLinked\n";
+}
+
+// The add-on is missing from the export, its popup empties and leaves two separators in a row: only the
+// reduction after the drop makes the parts fit the live menu
+void TestPopupOfAbsentAddOnLeavesTheMenuLinked() {
+    const std::string absent = Item(9, 5, 6);
+    AssertLinksAll({ kA, kCut, Popup(Menu(L"H", L"Hidden", { absent })), kCut, kB }, { 201, 0, 202 }, kTitlesAB, { 201, 202 });
+    std::cout << "[PASS] TestPopupOfAbsentAddOnLeavesTheMenuLinked\n";
 }
 
 void TestSurplusSeparatorsLeaveTheMenuLinked() {
@@ -1127,6 +1146,7 @@ int main() {
     TestRunPostsCommand();
     TestRunRefusesDisabled();
     TestRunRefusesChangedId();
+    TestRunRefusesIdLongerThanACommand();
     TestRunRefusesWrongKindOrPosition();
     TestRunRefusesDisabledFrame();
     TestNestedPopups();
@@ -1149,6 +1169,7 @@ int main() {
     TestCountMismatchPartIsNotCounted();
     TestItemNotShownLeavesItsPartLinked();
     TestPopupLeftEmptyLeavesItsPartLinked();
+    TestPopupOfAbsentAddOnLeavesTheMenuLinked();
     TestSurplusSeparatorsLeaveTheMenuLinked();
     TestItemShownAfterAllLeavesItsPartUnlinked();
     TestItemNotShownNextToPlaceholderMakesItsPartUncertain();

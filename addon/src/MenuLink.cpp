@@ -96,8 +96,9 @@ static std::vector<Segment> SplitSegments(const std::vector<Entry>& entries) {
 }
 
 // The part may have shifted since the export: it holds an add-on item, whose add-on may have been unloaded
-// since, or it lost an entry to DropAbsentAddOnItems, whose add-on may have been loaded since. Next to a
-// placeholder the item count cannot show such a shift.
+// since, or it lost an entry: to DropAbsentAddOnItems, whose add-on may have been loaded since, or to
+// ReduceToShownMenu, whose "(Empty)" item may be shown after all. Next to a placeholder the item count
+// cannot show such a shift.
 static bool IsUncertainPart(const std::vector<MenuNode>& catalogue, const Segment& segment) {
     for (size_t i = segment.begin; i < segment.end; ++i) {
         const MenuNode& node = catalogue[i];

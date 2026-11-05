@@ -6,7 +6,8 @@
 
 namespace Baaz {
 
-// The pinned line above the results that says why Archicad's commands are missing, with a short guide
+// The pinned line above the results: why Archicad's commands are missing, with a short guide, and, once,
+// that the last command did not run
 struct HintRow {
     std::wstring title;                // empty: no row
     std::vector<std::wstring> guide;   // numbered steps, one per line below the title
