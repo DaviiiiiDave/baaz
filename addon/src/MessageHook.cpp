@@ -15,6 +15,7 @@ bool MessageHook::s_spaceDown = false;
 bool MessageHook::s_holdConfirmed = false;
 bool MessageHook::s_swallowNextLButtonUp = false;
 bool MessageHook::s_swallowTrailingKeyUp = false;
+UINT MessageHook::s_replayedButtonUp = 0;
 
 static bool IsKeyMessage(UINT msg) {
     return msg == WM_KEYDOWN || msg == WM_KEYUP || msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP;
@@ -33,14 +34,23 @@ static void SendWandSpace(bool keyUp) {
     SendInput(1, &input, sizeof(INPUT));
 }
 
-// Archicad 29 takes Space from its own key message, so the click Space modifies
-// has to arrive after it; the real click is withheld and replayed behind Space.
-static void SendWandClick(UINT downMsg) {
+// False if the system refused the event.
+static bool SendWandMouse(DWORD flags) {
     INPUT input = {};
     input.type = INPUT_MOUSE;
-    input.mi.dwFlags = (downMsg == WM_LBUTTONDOWN) ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_RIGHTDOWN;
+    input.mi.dwFlags = flags;
     input.mi.dwExtraInfo = SENTINEL_MAGIC_WAND;
-    SendInput(1, &input, sizeof(INPUT));
+    return SendInput(1, &input, sizeof(INPUT)) == 1;
+}
+
+// Archicad 29 takes Space from its own key message, so the click Space modifies
+// has to arrive after it; the real click is withheld and replayed behind Space.
+static bool SendWandClick(UINT downMsg) {
+    return SendWandMouse((downMsg == WM_LBUTTONDOWN) ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_RIGHTDOWN);
+}
+
+static bool SendWandRelease(UINT upMsg) {
+    return SendWandMouse((upMsg == WM_LBUTTONUP) ? MOUSEEVENTF_LEFTUP : MOUSEEVENTF_RIGHTUP);
 }
 
 static void Unhook(HHOOK& hook) {
@@ -114,7 +124,8 @@ void CALLBACK MessageHook::HoldTimerProc(HWND /*hwnd*/, UINT /*uMsg*/, UINT_PTR 
 LRESULT CALLBACK MessageHook::GetMsgHookProc(int code, WPARAM wParam, LPARAM lParam) {
     MSG* pMsg = reinterpret_cast<MSG*>(lParam);
     const bool relevant = pMsg && (IsKeyMessage(pMsg->message) ||
-                                   pMsg->message == WM_LBUTTONDOWN || pMsg->message == WM_RBUTTONDOWN);
+                                   pMsg->message == WM_LBUTTONDOWN || pMsg->message == WM_RBUTTONDOWN ||
+                                   pMsg->message == WM_LBUTTONUP || pMsg->message == WM_RBUTTONUP);
     if (code < 0 || !relevant) {
         return CallNextHookEx(s_hGetMsgHook, code, wParam, lParam);
     }
@@ -208,8 +219,18 @@ LRESULT CALLBACK MessageHook::GetMsgHookProc(int code, WPARAM wParam, LPARAM lPa
         keys[VK_SPACE] |= 0x80;
         SetKeyboardState(keys);
         SendWandSpace(false);
-        SendWandClick(msg);
+        // Refused: the user's own click still reaches Archicad rather than vanishing
+        if (!SendWandClick(msg)) return CallNextHookEx(s_hGetMsgHook, code, wParam, lParam);
+        s_replayedButtonUp = (msg == WM_LBUTTONDOWN) ? WM_LBUTTONUP : WM_RBUTTONUP;
         return swallow();
+    }
+
+    // The release of a replayed click has to follow the replayed press, however early the
+    // user lets go; the real one is withheld and replayed. The replayed one passes, because
+    // the marker is cleared. Nothing is waiting while s_replayedButtonUp is 0.
+    if (msg == s_replayedButtonUp) {
+        s_replayedButtonUp = 0;
+        if (SendWandRelease(msg)) return swallow();
     }
 
     return CallNextHookEx(s_hGetMsgHook, code, wParam, lParam);

@@ -26,12 +26,15 @@ static std::vector<INPUT> g_sent;
 static std::vector<MSG> g_delivered;
 static std::vector<unsigned> g_commands;
 static int g_clicksDelivered = 0;
+static int g_releasesDelivered = 0;
+static bool g_failMouseInput = false;
 static int g_failures = 0;
 static HWND g_main = NULL;
 static HWND g_edit = NULL;
 static HWND g_dgRichEdit = NULL;
 
 UINT WINAPI TestSendInput(UINT cInputs, LPINPUT pInputs, int /*cbSize*/) {
+    if (g_failMouseInput && cInputs > 0 && pInputs[0].type == INPUT_MOUSE) return 0;  // as if the system refused it
     for (UINT i = 0; i < cInputs; ++i) g_sent.push_back(pInputs[i]);
     return cInputs;
 }
@@ -45,6 +48,11 @@ static LPARAM KeyLParam(WPARAM vk, bool up, bool repeat = false) {
     return lp;
 }
 
+static void CountMouseButtons(const MSG& m) {
+    if (m.message == WM_LBUTTONDOWN || m.message == WM_RBUTTONDOWN) ++g_clicksDelivered;
+    if (m.message == WM_LBUTTONUP || m.message == WM_RBUTTONUP) ++g_releasesDelivered;
+}
+
 // Archicad's event loop peeks at pending messages before removing them; the
 // hook runs on both passes. peekFirst reproduces that.
 static void Pump(bool peekFirst) {
@@ -54,7 +62,7 @@ static void Pump(bool peekFirst) {
         if (!PeekMessageW(&m, NULL, 0, 0, PM_REMOVE)) break;
         if (m.message == WM_KEYDOWN || m.message == WM_KEYUP) g_delivered.push_back(m);
         if (m.message == WM_COMMAND && m.hwnd == g_main) g_commands.push_back(LOWORD(m.wParam));
-        if (m.message == WM_LBUTTONDOWN || m.message == WM_RBUTTONDOWN) ++g_clicksDelivered;
+        CountMouseButtons(m);
         DispatchMessageW(&m);
     }
 }
@@ -113,6 +121,11 @@ static int DeliveredSpaces() {
 static void Reset() {
     if (HudWindow::IsVisible()) HudWindow::Hide();
     PumpFor(450, false);  // let any hold timer from the previous test expire
+    g_failMouseInput = false;
+    // The user lets go of both buttons: a click replayed by the previous test is over
+    PostMessageW(g_main, WM_LBUTTONUP, 0, MAKELPARAM(10, 10));
+    PostMessageW(g_main, WM_RBUTTONUP, 0, MAKELPARAM(10, 10));
+    Pump(false);
     BYTE keys[256] = {};
     SetKeyboardState(keys);
     SetFocus(g_main);
@@ -121,6 +134,7 @@ static void Reset() {
     g_delivered.clear();
     g_commands.clear();
     g_clicksDelivered = 0;
+    g_releasesDelivered = 0;
 }
 
 static void Run(const char* name, void (*test)(bool), bool peekFirst) {
@@ -277,6 +291,148 @@ static void ReplayedClickIsNotWithheldAgain(bool peek, UINT clickMsg) {
 static void ReplayedLeftClickIsNotWithheldAgain(bool peek) { ReplayedClickIsNotWithheldAgain(peek, WM_LBUTTONDOWN); }
 
 static void ReplayedRightClickIsNotWithheldAgain(bool peek) { ReplayedClickIsNotWithheldAgain(peek, WM_RBUTTONDOWN); }
+
+// Archicad may still be busy when the user lets go of the button. The real button-up must not
+// overtake the replayed button-down, so it is withheld and replayed behind it.
+static void ReleaseIsReplayedBehindClick(bool peek, UINT clickMsg, UINT upMsg, DWORD upFlag) {
+    Key(WM_KEYDOWN, VK_SPACE, peek);
+    PostMessageW(g_main, clickMsg, 0, MAKELPARAM(10, 10));
+    Pump(peek);
+    PostMessageW(g_main, upMsg, 0, MAKELPARAM(10, 10));
+    Pump(peek);
+    CHECK(g_releasesDelivered == 0);
+    CHECK(g_sent.size() == 3);
+    if (g_sent.size() == 3) {
+        CHECK(g_sent[2].type == INPUT_MOUSE && (g_sent[2].mi.dwFlags & upFlag) != 0);
+        CHECK(g_sent[2].mi.dwExtraInfo == SENTINEL_MAGIC_WAND);
+    }
+    Key(WM_KEYUP, VK_SPACE, peek);
+}
+
+static void LeftReleaseIsReplayedBehindClick(bool peek) {
+    ReleaseIsReplayedBehindClick(peek, WM_LBUTTONDOWN, WM_LBUTTONUP, MOUSEEVENTF_LEFTUP);
+}
+
+static void RightReleaseIsReplayedBehindClick(bool peek) {
+    ReleaseIsReplayedBehindClick(peek, WM_RBUTTONDOWN, WM_RBUTTONUP, MOUSEEVENTF_RIGHTUP);
+}
+
+// The replayed button-up passes the hook again: it must not be withheld a second time.
+static void ReplayedReleaseIsNotWithheldAgain(bool peek, UINT clickMsg, UINT upMsg) {
+    Key(WM_KEYDOWN, VK_SPACE, peek);
+    PostMessageW(g_main, clickMsg, 0, MAKELPARAM(10, 10));
+    Pump(peek);
+    PostMessageW(g_main, upMsg, 0, MAKELPARAM(10, 10));
+    Pump(peek);
+    PostMessageW(g_main, upMsg, 0, MAKELPARAM(10, 10));  // stands in for the replayed button-up
+    Pump(peek);
+    CHECK(g_releasesDelivered == 1);
+    CHECK(g_sent.size() == 3);
+    Key(WM_KEYUP, VK_SPACE, peek);
+}
+
+static void ReplayedLeftReleaseIsNotWithheldAgain(bool peek) {
+    ReplayedReleaseIsNotWithheldAgain(peek, WM_LBUTTONDOWN, WM_LBUTTONUP);
+}
+
+static void ReplayedRightReleaseIsNotWithheldAgain(bool peek) {
+    ReplayedReleaseIsNotWithheldAgain(peek, WM_RBUTTONDOWN, WM_RBUTTONUP);
+}
+
+// Without a replayed click there is nothing to order: a button-up belongs to Archicad.
+static void ReleasesWithoutReplayAreDelivered(bool peek) {
+    PostMessageW(g_main, WM_LBUTTONUP, 0, MAKELPARAM(10, 10));
+    Pump(peek);
+    CHECK(g_releasesDelivered == 1);
+    PostMessageW(g_main, WM_RBUTTONUP, 0, MAKELPARAM(10, 10));
+    Pump(peek);
+    CHECK(g_releasesDelivered == 2);
+    CHECK(g_sent.empty());
+}
+
+// The same for the release: a refused replay must not swallow the user's button-up.
+static void RefusedReleaseReplayDeliversTheOriginalRelease(bool peek) {
+    Key(WM_KEYDOWN, VK_SPACE, peek);
+    PostMessageW(g_main, WM_LBUTTONDOWN, 0, MAKELPARAM(10, 10));
+    Pump(peek);
+    g_failMouseInput = true;
+    PostMessageW(g_main, WM_LBUTTONUP, 0, MAKELPARAM(10, 10));
+    Pump(peek);
+    CHECK(g_releasesDelivered == 1);
+    Key(WM_KEYUP, VK_SPACE, peek);
+}
+
+// If the system refuses the replayed click, the user's own click goes to Archicad instead of vanishing.
+static void RefusedReplayDeliversTheOriginalClick(bool peek) {
+    g_failMouseInput = true;
+    Key(WM_KEYDOWN, VK_SPACE, peek);
+    PostMessageW(g_main, WM_LBUTTONDOWN, 0, MAKELPARAM(10, 10));
+    Pump(peek);
+    CHECK(g_clicksDelivered == 1);
+    PostMessageW(g_main, WM_LBUTTONUP, 0, MAKELPARAM(10, 10));
+    Pump(peek);
+    CHECK(g_releasesDelivered == 1);
+    CHECK(WandReleases() == 0);
+    Key(WM_KEYUP, VK_SPACE, peek);
+    CHECK(WandPresses() == 1);
+    CHECK(WandReleases() == 1);  // the wand Space sent before the refusal is let go again
+}
+
+// A refusal that is over by the time the button is released must leave nothing pending:
+// the user's button-up belongs to Archicad, there is no replayed press to follow.
+static void RefusedClickLeavesNoReplayPending(bool peek) {
+    g_failMouseInput = true;
+    Key(WM_KEYDOWN, VK_SPACE, peek);
+    PostMessageW(g_main, WM_LBUTTONDOWN, 0, MAKELPARAM(10, 10));
+    Pump(peek);
+    g_failMouseInput = false;
+    PostMessageW(g_main, WM_LBUTTONUP, 0, MAKELPARAM(10, 10));
+    Pump(peek);
+    CHECK(g_releasesDelivered == 1);
+    CHECK(g_sent.size() == 1);  // only the wand Space
+    Key(WM_KEYUP, VK_SPACE, peek);
+}
+
+// The user may let go of Space before the button; the release still has to follow the press.
+static void ReleaseIsReplayedAfterSpaceIsReleased(bool peek, UINT clickMsg, UINT upMsg, DWORD upFlag) {
+    Key(WM_KEYDOWN, VK_SPACE, peek);
+    PostMessageW(g_main, clickMsg, 0, MAKELPARAM(10, 10));
+    Pump(peek);
+    Key(WM_KEYUP, VK_SPACE, peek);
+    PostMessageW(g_main, upMsg, 0, MAKELPARAM(10, 10));
+    Pump(peek);
+    CHECK(g_releasesDelivered == 0);
+    CHECK(WandReleases() == 1);
+    CHECK(g_sent.size() == 4);  // Space down, click, Space up, button up
+    if (g_sent.size() == 4) {
+        CHECK(g_sent[3].type == INPUT_MOUSE && (g_sent[3].mi.dwFlags & upFlag) != 0);
+        CHECK(g_sent[3].mi.dwExtraInfo == SENTINEL_MAGIC_WAND);
+    }
+}
+
+static void LeftReleaseIsReplayedAfterSpaceIsReleased(bool peek) {
+    ReleaseIsReplayedAfterSpaceIsReleased(peek, WM_LBUTTONDOWN, WM_LBUTTONUP, MOUSEEVENTF_LEFTUP);
+}
+
+static void RightReleaseIsReplayedAfterSpaceIsReleased(bool peek) {
+    ReleaseIsReplayedAfterSpaceIsReleased(peek, WM_RBUTTONDOWN, WM_RBUTTONUP, MOUSEEVENTF_RIGHTUP);
+}
+
+// Only the release of the replayed button waits; the other button is not part of the replay.
+static void ReleaseOfTheOtherButtonIsDelivered(bool peek) {
+    Key(WM_KEYDOWN, VK_SPACE, peek);
+    PostMessageW(g_main, WM_LBUTTONDOWN, 0, MAKELPARAM(10, 10));
+    Pump(peek);
+    PostMessageW(g_main, WM_RBUTTONUP, 0, MAKELPARAM(10, 10));
+    Pump(peek);
+    CHECK(g_releasesDelivered == 1);
+    CHECK(g_sent.size() == 2);
+    PostMessageW(g_main, WM_LBUTTONUP, 0, MAKELPARAM(10, 10));
+    Pump(peek);
+    CHECK(g_releasesDelivered == 1);  // the left one is withheld and replayed
+    CHECK(g_sent.size() == 3);
+    Key(WM_KEYUP, VK_SPACE, peek);
+}
 
 static void TextFieldGetsTheSpace(bool peek) {
     SetFocus(g_edit);
@@ -640,6 +796,17 @@ int main() {
         Run("A click after a replayed click is delivered", ClickAfterReplayedClickIsDelivered, peek);
         Run("A replayed left click is not withheld again", ReplayedLeftClickIsNotWithheldAgain, peek);
         Run("A replayed right click is not withheld again", ReplayedRightClickIsNotWithheldAgain, peek);
+        Run("Left button-up is replayed behind the click", LeftReleaseIsReplayedBehindClick, peek);
+        Run("Right button-up is replayed behind the click", RightReleaseIsReplayedBehindClick, peek);
+        Run("A replayed left button-up is not withheld again", ReplayedLeftReleaseIsNotWithheldAgain, peek);
+        Run("A replayed right button-up is not withheld again", ReplayedRightReleaseIsNotWithheldAgain, peek);
+        Run("Button-ups without a replay are delivered", ReleasesWithoutReplayAreDelivered, peek);
+        Run("A refused replay delivers the original click", RefusedReplayDeliversTheOriginalClick, peek);
+        Run("A refused release replay delivers the original button-up", RefusedReleaseReplayDeliversTheOriginalRelease, peek);
+        Run("A refused click leaves no replay pending", RefusedClickLeavesNoReplayPending, peek);
+        Run("Left button-up is replayed after Space is released", LeftReleaseIsReplayedAfterSpaceIsReleased, peek);
+        Run("Right button-up is replayed after Space is released", RightReleaseIsReplayedAfterSpaceIsReleased, peek);
+        Run("The other button's release is delivered", ReleaseOfTheOtherButtonIsDelivered, peek);
         Run("Text field keeps the space", TextFieldGetsTheSpace, peek);
         Run("DG rich edit keeps the space", DgRichEditKeepsTheSpace, peek);
         Run("Modal dialog keeps the space", ModalDialogGetsTheSpace, peek);
