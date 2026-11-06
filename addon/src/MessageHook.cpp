@@ -34,8 +34,6 @@ static void SendWandSpace(bool keyUp) {
     SendInput(1, &input, sizeof(INPUT));
 }
 
-// Archicad 29 takes Space from its own key message, so the click Space modifies
-// has to arrive after it; the real click is withheld and replayed behind Space.
 // False if the system refused the event.
 static bool SendWandMouse(DWORD flags) {
     INPUT input = {};
@@ -45,6 +43,8 @@ static bool SendWandMouse(DWORD flags) {
     return SendInput(1, &input, sizeof(INPUT)) == 1;
 }
 
+// Archicad 29 takes Space from its own key message, so the click Space modifies
+// has to arrive after it; the real click is withheld and replayed behind Space.
 static bool SendWandClick(UINT downMsg) {
     return SendWandMouse((downMsg == WM_LBUTTONDOWN) ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_RIGHTDOWN);
 }
