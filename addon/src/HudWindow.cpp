@@ -369,13 +369,15 @@ void HudWindow::HandleKey(WPARAM vk, WCHAR ch) {
         ExecuteSelection();
         break;
     case VK_SPACE:
-        // Space on an empty search closes the HUD (tap to open, tap to close).
-        // Otherwise it executes like Enter; Shift+Space, Space while nothing
-        // matches, or Space on the hint row (which never runs on Space) types a
-        // literal space for multi-word searches.
-        if (s_query.empty()) {
+        // Shift+Space always types a space. Plain Space on an empty search closes
+        // the HUD (tap to open, tap to close); otherwise it executes like Enter,
+        // except while nothing matches or on the hint row (which never runs on
+        // Space), where it types a literal space for multi-word searches.
+        if (GetKeyState(VK_SHIFT) & 0x8000) {
+            SetQuery(s_query + L' ');
+        } else if (s_query.empty()) {
             Hide();
-        } else if ((GetKeyState(VK_SHIFT) & 0x8000) || s_results.empty() || s_hintSelected) {
+        } else if (s_results.empty() || s_hintSelected) {
             SetQuery(s_query + L' ');
         } else {
             ExecuteSelection();

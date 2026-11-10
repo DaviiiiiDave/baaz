@@ -516,6 +516,21 @@ static void ShiftSpaceTypesSpace(bool peek) {
     CHECK(ExecutedChord().empty());
 }
 
+static void ShiftSpaceOnEmptyQueryTypesSpace(bool peek) {
+    Tap(VK_SPACE, peek);
+    BYTE keys[256] = {};
+    keys[VK_SHIFT] = 0x80;
+    SetKeyboardState(keys);
+    Tap(VK_SPACE, peek);
+    keys[VK_SHIFT] = 0;
+    SetKeyboardState(keys);
+    CHECK(HudWindow::IsVisible());
+    CHECK(HudWindow::GetQuery() == L" ");
+    CHECK(ExecutedChord().empty());
+    Tap(VK_ESCAPE, peek);
+    CHECK(!HudWindow::IsVisible());
+}
+
 static void BackspaceAndArrows(bool peek) {
     Tap(VK_SPACE, peek);
     Type(L"wax", peek);
@@ -815,6 +830,7 @@ int main() {
         Run("Space after chord runs it", SpaceAfterChordRunsIt, peek);
         Run("Enter runs selection", EnterRunsSelection, peek);
         Run("Shift+Space types a space", ShiftSpaceTypesSpace, peek);
+        Run("Shift+Space on an empty query types a space", ShiftSpaceOnEmptyQueryTypesSpace, peek);
         Run("Backspace and arrows", BackspaceAndArrows, peek);
         Run("Escape closes and clears", EscapeCloses, peek);
         Run("Space on empty query closes HUD", SpaceOnEmptyQueryCloses, peek);
