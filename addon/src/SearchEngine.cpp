@@ -151,10 +151,18 @@ void SearchEngine::Initialize() {
     }
 }
 
+bool SearchEngine::HasTool(int typeId, int variation) {
+    return typeId != 0 && std::any_of(s_tools.begin(), s_tools.end(), [&](const IndexedItem& tool) {
+        return tool.item.toolType == typeId && tool.item.toolVariation == variation;
+    });
+}
+
 void SearchEngine::SetProjectItems(std::vector<SearchItem> items) {
     s_projectItems.clear();
     s_projectItems.reserve(items.size());
     for (auto& item : items) {
+        // Components, MEP and other favorites without a tool of their own cannot be placed from here
+        if (item.kind == ItemKind::Favorite && !HasTool(item.toolType, item.toolVariation)) continue;
         s_projectItems.push_back(MakeIndexed(std::move(item)));
     }
 }
@@ -182,9 +190,16 @@ std::vector<std::wstring> SearchEngine::HelpLines(size_t chordsPerLine) {
     if (onLine > 0) lines.push_back(std::move(line));
 
     lines.push_back(L"Space tap: open/close HUD  \x2022  Hold " + std::to_wstring(Settings::Get().spacebarHoldMs) + L" ms: Magic Wand");
-    lines.push_back(L"Type to search views, sheets, layer combinations and tools  \x2022  ? help  \x2022  :settings");
+    lines.push_back(L"Type to search views, sheets, layer combinations, favorites and tools  \x2022  ? help  \x2022  :settings");
     lines.push_back(L"\x2191/\x2193 select  \x2022  Space/Enter run  \x2022  Shift+Space types a space  \x2022  Esc close");
     return lines;
+}
+
+// On equal scores a favorite is what the user can place next, so it follows the tools
+static int KindRank(ItemKind kind) {
+    if (kind == ItemKind::Tool) return 0;
+    if (kind == ItemKind::Favorite) return 1;
+    return 2;
 }
 
 static SearchItem MakeSettingsItem(const wchar_t* title) {
@@ -281,12 +296,12 @@ std::vector<SearchItem> SearchEngine::Query(const std::wstring& queryStr, size_t
         }
     }
 
-    // Score desc, then tools first, then title
+    // Score desc, then tools, favorites, everything else, then title
     auto better = [](const Candidate& a, const Candidate& b) {
         if (std::abs(a.score - b.score) > 0.001) return a.score > b.score;
-        const bool aTool = (a.entry->item.kind == ItemKind::Tool);
-        const bool bTool = (b.entry->item.kind == ItemKind::Tool);
-        if (aTool != bTool) return aTool;
+        const int aRank = KindRank(a.entry->item.kind);
+        const int bRank = KindRank(b.entry->item.kind);
+        if (aRank != bRank) return aRank < bRank;
         return a.entry->item.title < b.entry->item.title;
     };
     const size_t count = (std::min)(limit, candidates.size());

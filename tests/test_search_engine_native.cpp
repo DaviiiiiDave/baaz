@@ -9,6 +9,16 @@
 
 using namespace Baaz;
 
+static SearchItem Favorite(const wchar_t* name, int typeId, int variation, const wchar_t* folder = L"FAV") {
+    SearchItem item;
+    item.title = name;
+    item.tag = folder;
+    item.kind = ItemKind::Favorite;
+    item.toolType = typeId;
+    item.toolVariation = variation;
+    return item;
+}
+
 void TestEmptyQuery() {
     SearchEngine::Initialize();
     auto results = SearchEngine::Query(L"");
@@ -145,6 +155,61 @@ void TestPerformance1000Items() {
 #endif
 }
 
+void TestFavoritesWithoutToolAreDropped() {
+    SearchEngine::Initialize();
+    SearchEngine::SetProjectItems({
+        Favorite(L"KS 24 cm", 1, 0),                         // Wall: listed
+        Favorite(L"Eckfenster Holz", 4, 'CRWD'),             // Corner Window: listed
+        Favorite(L"Metall - Handlauf", 52, 0),               // railing component: dropped
+        Favorite(L"Kabeltrasse", 0, 0),                      // no type: dropped
+        Favorite(L"Fenster Sonder", 4, 12345),               // Window type, unknown variation: dropped
+    });
+    auto favoritesIn = [](const std::wstring& query) {
+        size_t n = 0;
+        for (const auto& r : SearchEngine::Query(query, 50)) n += (r.kind == ItemKind::Favorite);
+        return n;
+    };
+    assert(favoritesIn(L"ks 24") == 1);
+    assert(favoritesIn(L"eckfenster") == 1);
+    assert(favoritesIn(L"handlauf") == 0);
+    assert(favoritesIn(L"kabeltrasse") == 0);
+    assert(favoritesIn(L"sonder") == 0);
+    std::cout << "[PASS] TestFavoritesWithoutToolAreDropped\n";
+}
+
+void TestFavoriteRanksAfterToolBeforeView() {
+    SearchEngine::Initialize();
+    SearchEngine::SetProjectItems({
+        { L"Decke EG", L"VIEW", ItemKind::View, "GUID_DECKE" },
+        Favorite(L"Decke STB 20", 8, 0, L"Decken+Böden"),
+        Favorite(L"Wallpaper", 1, 0),
+    });
+    auto decke = SearchEngine::Query(L"decke");
+    assert(decke.size() >= 2);
+    assert(decke[0].kind == ItemKind::Favorite && decke[0].title == L"Decke STB 20");
+    assert(decke[1].kind == ItemKind::View);
+    assert(decke[0].tag == L"Decken+Böden");
+
+    // "Curtain Wall Tool", "Wall End Tool", "Wall Tool" and "Wallpaper" all score 93
+    auto wall = SearchEngine::Query(L"wall", 20);
+    size_t fav = 0;
+    while (fav < wall.size() && wall[fav].kind != ItemKind::Favorite) ++fav;
+    assert(fav > 0 && fav < wall.size());
+    for (size_t i = 0; i < fav; ++i) assert(wall[i].kind == ItemKind::Tool);
+
+    assert(SearchEngine::Query(L"wa")[0].title == L"Wall Tool");   // exact chord still wins
+    std::cout << "[PASS] TestFavoriteRanksAfterToolBeforeView\n";
+}
+
+void TestFavoriteFoundByWords() {
+    SearchEngine::Initialize();
+    SearchEngine::SetProjectItems({ Favorite(L"KS + WDVS 42 cm", 1, 0, L"Wände") });
+    auto results = SearchEngine::Query(L"ks wdvs");
+    assert(!results.empty());
+    assert(results[0].title == L"KS + WDVS 42 cm");
+    std::cout << "[PASS] TestFavoriteFoundByWords\n";
+}
+
 int main() {
     std::cout << "Running Native Archicad Search Engine Unit Tests...\n";
     TestEmptyQuery();
@@ -154,6 +219,9 @@ int main() {
     TestLevenshteinTypoTolerance();
     TestUnicodeSupport();
     TestPerformance1000Items();
-    std::cout << "\nALL 7 SEARCH ENGINE NATIVE TESTS PASSED!\n";
+    TestFavoritesWithoutToolAreDropped();
+    TestFavoriteRanksAfterToolBeforeView();
+    TestFavoriteFoundByWords();
+    std::cout << "\nALL 10 SEARCH ENGINE NATIVE TESTS PASSED!\n";
     return 0;
 }
