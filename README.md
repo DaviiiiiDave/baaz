@@ -7,6 +7,9 @@ the plan to open a search bar, type, and press Space or Enter to run:
   `tx` Text… every tool in the Toolbox that the API can activate (type `?` for the list).
 - **Views and sheets** from the Project Navigator, by name or number (`a101`, `gfc mas`).
 - **Layer combinations**.
+- **Favorites** of the open project, by name: the tool becomes active with the favorite's
+  settings, and you place the element yourself. Only favorites with a tool of their own are
+  listed, not components such as railing posts or stair treads.
 
 Holding Space still works as Archicad's Magic Wand, and so does Space + click.
 The search bar follows Archicad's light or dark theme.
@@ -16,7 +19,7 @@ The search bar follows Archicad's light or dark theme.
 | Space (tap) | Open the search bar; tap again on an empty search to close it |
 | Space (hold) | Magic Wand, as usual |
 | Space / Enter | Run the selected result |
-| Shift+Space | Type a space (multi-word searches) |
+| Shift+Space | Type a space (multi-word searches), also on an empty search |
 | ↑ / ↓ / Tab | Move the selection |
 | Esc | Close |
 | `?` | Cheatsheet of all chords |

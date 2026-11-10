@@ -6,6 +6,7 @@
 #ifdef ACAPI_VERSION
 #include "APIEnvir.h"
 #include "ACAPinc.h"
+#include "ACAPI/Favorite.hpp"
 #else
 #include <cwctype>
 #endif
@@ -47,6 +48,21 @@ static bool SetLayerCombo(const SearchItem& item) {
     return (ACAPI_Navigator_ChangeCurrLayerComb(&layerCombIndex) == NoError);
 }
 
+// Same as double-clicking the favorite in the Favorites palette: its settings become the
+// tool's defaults and the tool becomes active. Placing the element is left to the user.
+static bool ApplyFavorite(const SearchItem& item) {
+    try {
+        const GS::UniString name(reinterpret_cast<const GS::UniChar::Layout*>(item.title.c_str()));
+        const auto favorite = ACAPI::Favorite::GetFavoriteManager().GetFavoriteByName(name);
+        if (favorite.IsErr()) return false;
+        const auto elementDefault = favorite.Unwrap().GetElementDefault();
+        if (elementDefault.IsErr() || elementDefault.Unwrap().SetAsArchicadDefault().IsErr()) return false;
+    } catch (...) {
+        return false;
+    }
+    return SetTool(item);
+}
+
 #else
 
 // Without Archicad (tests): "select" a tool by typing its chord
@@ -65,6 +81,7 @@ static bool SetTool(const SearchItem& item) {
 static bool GoToView(const SearchItem&) { return true; }
 static bool GoToLayout(const SearchItem&) { return true; }
 static bool SetLayerCombo(const SearchItem&) { return true; }
+static bool ApplyFavorite(const SearchItem&) { return true; }
 
 #endif
 
@@ -82,6 +99,7 @@ bool CommandExecutor::Execute(const SearchItem& item) {
     case ItemKind::View:       return GoToView(item);
     case ItemKind::Sheet:      return GoToLayout(item);
     case ItemKind::LayerCombo: return SetLayerCombo(item);
+    case ItemKind::Favorite:   return ApplyFavorite(item);
     case ItemKind::Setting:
         SettingsDialog::Show(MainWindow());
         return true;
