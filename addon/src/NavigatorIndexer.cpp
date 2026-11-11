@@ -92,14 +92,16 @@ static void CollectLayerCombinations(std::vector<SearchItem>& items) {
     }
 }
 
-// Only the innermost folder fits the right column; favorites at the top level show FAV
+// Only the innermost folder fits the right column. FAV means the top level; ? means the folder
+// could not be read, so a failed lookup is never shown as a top-level favorite.
 static std::wstring FavoriteFolderText(const ACAPI::Favorite::Favorite& favorite) {
     const auto parent = favorite.GetParentFolder();
-    if (parent.IsErr()) return L"FAV";
+    if (parent.IsErr()) return L"?";
     const auto isRoot = parent.Unwrap().IsRoot();
-    if (isRoot.IsErr() || isRoot.Unwrap()) return L"FAV";
+    if (isRoot.IsErr()) return L"?";
+    if (isRoot.Unwrap()) return L"FAV";
     const auto folderName = parent.Unwrap().GetName();
-    return folderName.IsOk() ? ToWString(folderName.Unwrap()) : L"FAV";
+    return folderName.IsOk() ? ToWString(folderName.Unwrap()) : L"?";
 }
 
 // Which of these can be placed is decided by SearchEngine, which knows the tool table

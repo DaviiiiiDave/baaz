@@ -210,6 +210,24 @@ void TestFavoriteFoundByWords() {
     std::cout << "[PASS] TestFavoriteFoundByWords\n";
 }
 
+void TestWhitespacePaddedChordKeepsExactChordRank() {
+    SearchEngine::Initialize();
+    SearchEngine::SetProjectItems({ Favorite(L"Wallpaper", 1, 0) });
+    // Shift+Space makes a leading space reachable; the chord must still win over "Curtain Wall Tool"
+    assert(SearchEngine::Query(L" wa")[0].title == L"Wall Tool");
+    assert(SearchEngine::Query(L"wa ")[0].title == L"Wall Tool");
+    assert(SearchEngine::Query(L" wa ")[0].score == 100.0);
+    std::cout << "[PASS] TestWhitespacePaddedChordKeepsExactChordRank\n";
+}
+
+void TestWhitespaceOnlyQueryReturnsNothing() {
+    SearchEngine::Initialize();
+    SearchEngine::SetProjectItems({ Favorite(L"KS 24 cm", 1, 0) });
+    assert(SearchEngine::Query(L" ").empty());
+    assert(SearchEngine::Query(L"   ").empty());
+    std::cout << "[PASS] TestWhitespaceOnlyQueryReturnsNothing\n";
+}
+
 int main() {
     std::cout << "Running Native Archicad Search Engine Unit Tests...\n";
     TestEmptyQuery();
@@ -222,6 +240,8 @@ int main() {
     TestFavoritesWithoutToolAreDropped();
     TestFavoriteRanksAfterToolBeforeView();
     TestFavoriteFoundByWords();
-    std::cout << "\nALL 10 SEARCH ENGINE NATIVE TESTS PASSED!\n";
+    TestWhitespacePaddedChordKeepsExactChordRank();
+    TestWhitespaceOnlyQueryReturnsNothing();
+    std::cout << "\nALL 12 SEARCH ENGINE NATIVE TESTS PASSED!\n";
     return 0;
 }

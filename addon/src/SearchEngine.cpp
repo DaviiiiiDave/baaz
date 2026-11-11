@@ -25,6 +25,13 @@ static std::wstring Join(const std::vector<std::wstring>& tokens) {
     return joined;
 }
 
+// Shift+Space can leave a space at either end; it must not cost a chord its exact match
+static std::wstring Trim(const std::wstring& str) {
+    const size_t first = str.find_first_not_of(L" \t");
+    if (first == std::wstring::npos) return L"";
+    return str.substr(first, str.find_last_not_of(L" \t") - first + 1);
+}
+
 // Lower-cased alphanumeric runs; everything else separates tokens
 std::vector<std::wstring> SearchEngine::Tokenize(const std::wstring& str) {
     std::vector<std::wstring> tokens;
@@ -243,6 +250,7 @@ std::vector<SearchItem> SearchEngine::Query(const std::wstring& queryStr, size_t
         return { MakeSettingsItem(L"Open Settings & Help Dialog (Timings, Chords, Display)") };
     }
 
+    const std::wstring chordQuery = Trim(lowerQuery);
     const std::vector<std::wstring> queryTokens = Tokenize(lowerQuery);
     const std::wstring cleanQuery = Join(queryTokens);
 
@@ -252,8 +260,8 @@ std::vector<SearchItem> SearchEngine::Query(const std::wstring& queryStr, size_t
 
         // Tier 1: exact chord, Tier 1.5: single letter matching a chord's first letter
         if (settings.enableChords && isTool) {
-            if (item.tag == lowerQuery) return 100.0;
-            if (lowerQuery.length() == 1 && !item.tag.empty() && item.tag[0] == lowerQuery[0]) return 98.0;
+            if (item.tag == chordQuery) return 100.0;
+            if (chordQuery.length() == 1 && !item.tag.empty() && item.tag[0] == chordQuery[0]) return 98.0;
         }
 
         // Tier 2: alphanumeric match, ignoring punctuation and spaces

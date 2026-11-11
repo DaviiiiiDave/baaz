@@ -108,7 +108,8 @@ therefore safe.
 
 - Left: the favorite's name, unchanged.
 - Right: the name of the folder that directly contains the favorite (for `Stützen+Träger ›
-  Segmente` that is `Segmente`). For a favorite at the top level, `FAV`.
+  Segmente` that is `Segmente`). For a favorite at the top level, `FAV`; if the folder cannot be
+  read, `?`, so a failed lookup never looks like a top-level favorite.
 
 The right column is 90 px wide (`HudWindow.cpp:429`); a full folder path does not fit, which is
 why only the innermost folder name is shown.
