@@ -7,8 +7,8 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 # The .grc files are the source. tools/CompileResources.py runs the DevKit's
 # ResConv on them and compiles RFIX.win/AddOnMain.rc2 into Baaz.res.
 
-# Until Baaz has a Graphisoft-issued MDID, local test builds can take one from
-# resources/AddOnFix.local.grc (not committed). Never distribute such a build.
+# Local test builds can take a different MDID from resources/AddOnFix.local.grc
+# (not committed). Never distribute such a build.
 option(BAAZ_DEV_MDID "Use the MDID in resources/AddOnFix.local.grc (local testing only)" OFF)
 
 set(RES_STAGE ${CMAKE_CURRENT_BINARY_DIR}/ResourceSources)
