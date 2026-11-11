@@ -3,6 +3,7 @@
 #ifdef ACAPI_VERSION
 #include "APIEnvir.h"
 #include "ACAPinc.h"
+#include "ACAPI/Favorite.hpp"
 #endif
 
 namespace Baaz {
@@ -91,6 +92,42 @@ static void CollectLayerCombinations(std::vector<SearchItem>& items) {
     }
 }
 
+// Only the innermost folder fits the right column. FAV means the top level; ? means the folder
+// could not be read, so a failed lookup is never shown as a top-level favorite.
+static std::wstring FavoriteFolderText(const ACAPI::Favorite::Favorite& favorite) {
+    const auto parent = favorite.GetParentFolder();
+    if (parent.IsErr()) return L"?";
+    const auto isRoot = parent.Unwrap().IsRoot();
+    if (isRoot.IsErr()) return L"?";
+    if (isRoot.Unwrap()) return L"FAV";
+    const auto folderName = parent.Unwrap().GetName();
+    return folderName.IsOk() ? ToWString(folderName.Unwrap()) : L"?";
+}
+
+// Which of these can be placed is decided by SearchEngine, which knows the tool table
+static void CollectFavorites(std::vector<SearchItem>& items) {
+    const size_t before = items.size();
+    try {
+        for (const ACAPI::Favorite::Favorite& favorite : ACAPI::Favorite::GetFavoriteManager().GetAllFavorites()) {
+            if (!favorite.IsValid()) continue;
+            const auto name = favorite.GetName();
+            const auto type = favorite.GetElementType();
+            if (name.IsErr() || type.IsErr()) continue;
+
+            SearchItem item;
+            item.title = ToWString(name.Unwrap());
+            item.tag = FavoriteFolderText(favorite);
+            item.kind = ItemKind::Favorite;
+            item.toolType = static_cast<int>(type.Unwrap().typeID);
+            item.toolVariation = static_cast<int>(type.Unwrap().variationID);
+            items.push_back(std::move(item));
+        }
+    } catch (...) {
+        // A throwing favorite list must not take views and layouts with it
+        items.resize(before);
+    }
+}
+
 bool NavigatorIndexer::HasOpenProject() {
     API_ProjectInfo projectInfo = {};
     return (ACAPI_ProjectOperation_Project(&projectInfo) == NoError);
@@ -101,6 +138,7 @@ std::vector<SearchItem> NavigatorIndexer::BuildProjectIndex() {
     CollectNavigatorMap(API_PublicViewMap, ItemKind::View, L"VIEW", items);
     CollectNavigatorMap(API_LayoutMap, ItemKind::Sheet, L"SHEET", items);
     CollectLayerCombinations(items);
+    CollectFavorites(items);
     return items;
 }
 

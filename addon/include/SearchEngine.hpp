@@ -5,7 +5,7 @@
 
 namespace Baaz {
 
-enum class ItemKind { Tool, View, Sheet, LayerCombo, Setting, Help, Command };
+enum class ItemKind { Tool, View, Sheet, LayerCombo, Setting, Help, Command, Favorite };
 
 struct SearchItem {
     std::wstring title;
@@ -41,6 +41,8 @@ private:
         std::vector<std::wstring> tokens;
     };
 
+    // True when the tool table has a row for this element type and variation; the Arrow row never counts
+    static bool HasTool(int typeId, int variation);
     static IndexedItem MakeIndexed(SearchItem item);
     static std::vector<std::wstring> Tokenize(const std::wstring& str);
 
