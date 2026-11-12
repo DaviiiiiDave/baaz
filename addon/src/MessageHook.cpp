@@ -47,6 +47,7 @@ static bool IsTextEditingActive(HWND hFocused) {
 
     bool isEditClass = (_wcsicmp(cls, L"Edit") == 0 ||
                         _wcsnicmp(cls, L"RichEdit", 8) == 0 ||
+                        _wcsicmp(cls, L"DGUniRichEditClass") == 0 ||
                         _wcsicmp(cls, L"Scintilla") == 0);
     return isEditClass && !(GetWindowLongPtrW(hFocused, GWL_STYLE) & ES_READONLY);
 }
