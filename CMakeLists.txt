@@ -13,7 +13,8 @@ if(MSVC)
     endif()
 endif()
 
-set(ARCHICAD_DEVKIT_DIR "$ENV{ARCHICAD_DEVKIT_DIR}" CACHE PATH "Archicad 30 DevKit folder (the one that contains Support/Inc)")
+set(BAAZ_AC_VERSION 30 CACHE STRING "Archicad version the add-on is built for (29 or 30)")
+set(ARCHICAD_DEVKIT_DIR "$ENV{ARCHICAD_DEVKIT_DIR}" CACHE PATH "Archicad ${BAAZ_AC_VERSION} DevKit folder (the one that contains Support/Inc)")
 
 # Sources that build both inside Archicad and, without the API, in the tests
 set(BAAZ_SHARED_SOURCES
@@ -32,6 +33,6 @@ enable_testing()
 if(EXISTS "${ARCHICAD_DEVKIT_DIR}/Support/Inc/ACAPinc.h")
     add_subdirectory(addon)
 else()
-    message(WARNING "ARCHICAD_DEVKIT_DIR is not set to an Archicad 30 DevKit; building the tests only")
+    message(WARNING "ARCHICAD_DEVKIT_DIR is not set to an Archicad ${BAAZ_AC_VERSION} DevKit; building the tests only")
 endif()
 add_subdirectory(tests)

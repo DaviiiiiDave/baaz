@@ -8,6 +8,7 @@
 #ifdef ACAPI_VERSION
 #include "APIEnvir.h"
 #include "ACAPinc.h"
+#include "DGDLLExport.h"  // DGColorCatalog.hpp in the AC 29 DevKit does not include it itself
 #include "AppearanceManager/DGColorCatalog.hpp"
 #endif
 
@@ -84,7 +85,11 @@ static Color SysColor(int index) {
 static HudPalette LoadPalette() {
     HudPalette p;
 #ifdef ACAPI_VERSION
+#if ACAPI_VERSION >= 30
     p.background = CatalogColor(DG::ColorId::DialogBackgroundColor);
+#else
+    p.background = CatalogColor(DG::ColorId::WindowBackgroundColor);  // AC 29 has no DialogBackgroundColor
+#endif
     p.text = CatalogColor(DG::ColorId::StandardTextColor);
     p.mutedText = CatalogColor(DG::ColorId::DisabledControlTextColor);
     p.selectedBackground = CatalogColor(DG::ColorId::SelectedContentBackgroundColor);

@@ -40,6 +40,9 @@ The add-on is `build/addon/Release/Baaz.apx`. In Archicad, open
 `ARCHICAD_DEVKIT_DIR` is the folder that contains `Support/Inc`; it can also come
 from an environment variable of the same name. Without it, only the tests build.
 
+To build for Archicad 29, point `ARCHICAD_DEVKIT_DIR` at the Archicad 29 DevKit and add
+`-DBAAZ_AC_VERSION=29` (the default is 30).
+
 ### Add-on ID (MDID)
 
 Archicad only loads add-ons whose `MDID` resource is a developer ID and add-on ID
