@@ -20,9 +20,10 @@ target_compile_options(test_message_hook PRIVATE "/FI${CMAKE_CURRENT_SOURCE_DIR}
 target_link_libraries(test_message_hook PRIVATE ${BAAZ_WIN32_LIBS})
 add_test(NAME MessageHookEdgeCases COMMAND test_message_hook)
 
-# Command scheme reader, tested against a trimmed copy of a real export
+# Command scheme reader and menu linking; the reader is tested against a trimmed copy of a real export
 add_executable(test_command_line_native
     test_command_line_native.cpp
+    ../addon/src/MenuLink.cpp
     ../addon/src/SchemeReader.cpp
 )
 target_include_directories(test_command_line_native PRIVATE ../addon/include)

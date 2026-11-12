@@ -22,6 +22,7 @@ struct MenuNode {
     unsigned mdid1 = 0;              // second part, Item only
     unsigned mdid2 = 0;              // third part, Item only
     std::vector<MenuNode> children;  // Popup only
+    bool partLostEntries = false;    // set by DropAbsentAddOnItems and ReduceToShownMenu on the entries of a part (between separators) that lost an entry
 };
 
 // Menu text without access keys: "&&" is a literal ampersand, a single "&" marks the access key.
