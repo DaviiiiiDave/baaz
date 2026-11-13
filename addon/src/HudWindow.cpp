@@ -4,6 +4,7 @@
 #include "NavigatorIndexer.hpp"
 #include <windowsx.h>
 #include <gdiplus.h>
+#include <algorithm>
 #include <memory>
 
 #ifdef ACAPI_VERSION
@@ -365,6 +366,46 @@ void HudWindow::HandleKey(WPARAM vk, WCHAR ch) {
     }
 }
 
+// Everything DrawResultRow needs that is the same for every row
+struct ResultRowStyle {
+    float scale;
+    const HudFonts& fonts;
+    const StringFormat& left;
+    const StringFormat& right;
+    const SolidBrush& text;
+    const SolidBrush& muted;
+    const SolidBrush& selText;
+    const SolidBrush& selTag;
+    const SolidBrush& selBackground;
+};
+
+// Title on the left, chord or category right-aligned in muted text, like shortcuts in
+// Archicad's menus. Disabled commands are greyed so the user sees they will not run.
+static void DrawResultRow(Graphics& g, const SearchItem& item, bool isSelected, float y, float width,
+                          const ResultRowStyle& style) {
+    const float scale = style.scale;
+    const float rowH = kRowH * scale;
+    const float padX = kPadX * scale;
+
+    if (isSelected) {
+        FillRoundedRect(g, style.selBackground, nullptr,
+                        RectF(4.0f * scale, y + 1.0f * scale, width - 8.0f * scale, rowH - 2.0f * scale), 3.0f * scale);
+    }
+
+    // Chords and "VIEW" fit the minimum; long command categories get the room they need,
+    // up to 40 % of the HUD, and are trimmed with an ellipsis beyond that
+    RectF measured;
+    g.MeasureString(item.tag.c_str(), -1, style.fonts.hint.get(), PointF(0.0f, 0.0f), &style.right, &measured);
+    const float tagW = std::clamp(measured.Width + padX, 90.0f * scale, 0.4f * width);
+
+    const SolidBrush* titleBrush = isSelected ? &style.selText : &style.text;
+    if (!item.enabled) titleBrush = isSelected ? &style.selTag : &style.muted;
+    g.DrawString(item.title.c_str(), -1, style.fonts.row.get(),
+                 RectF(padX, y, width - padX - tagW, rowH), &style.left, titleBrush);
+    g.DrawString(item.tag.c_str(), -1, style.fonts.hint.get(),
+                 RectF(width - tagW, y, tagW - padX, rowH), &style.right, isSelected ? &style.selTag : &style.muted);
+}
+
 void HudWindow::Render() {
     const int width = s_rect.right - s_rect.left;
     const int height = s_rect.bottom - s_rect.top;
@@ -384,7 +425,6 @@ void HudWindow::Render() {
         const float searchH = kSearchH * s_scale;
         const float rowH = kRowH * s_scale;
         const float padX = kPadX * s_scale;
-        const float tagW = 90.0f * s_scale;
 
         // 1. Panel
         SolidBrush bgBrush(pal.background);
@@ -400,6 +440,7 @@ void HudWindow::Render() {
         StringFormat formatRight;
         formatRight.SetAlignment(StringAlignmentFar);
         formatRight.SetLineAlignment(StringAlignmentCenter);
+        formatRight.SetTrimming(StringTrimmingEllipsisCharacter);
         formatRight.SetFormatFlags(StringFormatFlagsNoWrap);
 
         SolidBrush textBrush(pal.text);
@@ -424,20 +465,11 @@ void HudWindow::Render() {
         const float hintH = HintBlockHeight(s_hint) * s_scale;
         if (hintH > 0.0f) DrawHint(g, s_hint, searchH, static_cast<float>(width), s_scale, formatLeft);
 
-        // 4. Result rows: title on the left, chord or item kind right-aligned
-        // in muted text, like shortcuts in Archicad's menus
+        // 4. Result rows
         const float listY = searchH + hintH;
+        const ResultRowStyle rowStyle{ s_scale, fonts, formatLeft, formatRight, textBrush, mutedBrush, selTextBrush, selTagBrush, selBrush };
         for (size_t i = 0; i < s_results.size(); ++i) {
-            const float y = listY + i * rowH;
-            const bool isSelected = (i == s_selectedIndex);
-
-            if (isSelected) {
-                FillRoundedRect(g, selBrush, nullptr, RectF(4.0f * s_scale, y + 1.0f * s_scale, width - 8.0f * s_scale, rowH - 2.0f * s_scale), 3.0f * s_scale);
-            }
-            g.DrawString(s_results[i].title.c_str(), -1, fonts.row.get(),
-                         RectF(padX, y, width - padX - tagW, rowH), &formatLeft, isSelected ? &selTextBrush : &textBrush);
-            g.DrawString(s_results[i].tag.c_str(), -1, fonts.hint.get(),
-                         RectF(width - tagW, y, tagW - padX, rowH), &formatRight, isSelected ? &selTagBrush : &mutedBrush);
+            DrawResultRow(g, s_results[i], i == s_selectedIndex, listY + i * rowH, static_cast<float>(width), rowStyle);
         }
 
         // 5. Footer
