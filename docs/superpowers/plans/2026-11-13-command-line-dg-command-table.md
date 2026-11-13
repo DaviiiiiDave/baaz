@@ -240,4 +240,22 @@ UI-only (no logic the native tests can observe); verified manually in Task 5.
 
 ---
 
+### Task 6: Fixes from the manual check in Archicad 30 (Stage 7)
+
+Spec D7a and the 4.3 addendum, decided after the manual check (item 8 failed: "Ebene ausblenden" is disabled outside the right-click menu; a selected disabled row looked enabled).
+
+**Files:**
+- Modify: `addon/src/CommandCatalog.cpp`, `tests/test_command_catalog.cpp`
+- Modify: `addon/src/HudWindow.cpp` (`DrawResultRow`)
+
+**Interfaces:** unchanged (`CommandCatalog::IsOffered` gains a rule, no signature change).
+
+- [ ] **Step 1: Write the failing test** `TestDrawingContextMenuGroupIsDropped` in `tests/test_command_catalog.cpp`: every id of spec 4.2 item 4 (the 85-id list, copied verbatim into the test) with developer 0 / product 0, visible, named, enabled → `IsOffered` false; neighbours 2338, 2342, 8196, 8198, 9984, 9986, 10084, 19463, 19465, 19469 → true; id 9994 with developer 1 / product 2 → true.
+- [ ] **Step 2: Run it, see it fail.** Run: `ctest --test-dir build-ac30 -C Release --output-on-failure -R CommandCatalog` → FAIL on the first listed id.
+- [ ] **Step 3: Implement** the list as a sorted `static const` array in `CommandCatalog.cpp`, checked with `std::binary_search`, applied only when developer and product id are both 0 (same place as the range rule).
+- [ ] **Step 4: Neutral selection bar** in `DrawResultRow`: a selected row with `!item.enabled` fills its bar with the palette's divider colour instead of `selectedBackground`, and draws title and tag with `mutedBrush`; enabled rows unchanged. UI-only, checked by hand.
+- [ ] **Step 5: Full checks against both DevKits, commit** `fix(commands): drop the drawing context-menu group, neutral bar for disabled rows — Stage 7`.
+
+---
+
 Delivery: one branch, one pull request into the fork's `main` after Task 5 and the review pipeline (`feature/dg-command-table`).

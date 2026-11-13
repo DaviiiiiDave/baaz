@@ -47,9 +47,16 @@ in German Archicad 29 and Archicad 30, each with a project open. Nothing else wa
 - **D7. What is offered (option "C+").** Every visible command of Archicad and of the loaded
   add-ons, except Archicad's own commands of four palette context menus (Navigator, Drawing
   Manager, Issue Management, Model Review palette). Reason: those act on what is selected in a
-  palette the user is not looking at; a typed "Löschen" must not delete a view. The context menu
-  of the drawing window stays in ("Ebene ausblenden" acts on the selection the user sees), as do
-  status-bar and palette-shape commands.
+  palette the user is not looking at; a typed "Löschen" must not delete a view. Status-bar and
+  palette-shape commands stay in.
+- **D7a (2026-11-13, after the manual check in Archicad 30).** The group "Individuelles
+  Kontext-Menü" is excluded too. It was kept in D7 on the assumption that it is the drawing
+  window's context menu acting on the visible selection. The check disproved that: "Ebene
+  ausblenden" stays disabled with an element selected (Archicad enables it only inside the
+  right-click menu), and the group mixes many context menus (tab bar, views, energy), 38 of its 73
+  visible entries enabled without any selection, some acting on context the user does not see
+  ("Mit den aktuellen Einstellungen neu definieren", "Tab schließen"). Its ids are scattered, so it
+  is excluded by an explicit id list (4.2).
 - **D8. Fork first.** Built in the fork without regard to REVIEW.md; an upstream proposal is cut
   separately later.
 
@@ -87,6 +94,16 @@ An entry is offered when all of these hold:
 | 19201 – 19224 | Zeichnungsmanager Kontext-Menüs | none |
 | 30465 – 30471 | Issue-Management | none |
 
+4. *(D7a)* it is not one of Archicad's own commands (developer id 0 and product id 0) with one of
+   these 85 ids, the group "Individuelles Kontext-Menü", identical in AC29 and AC30:
+   2339, 2340, 2341, 2344, 2345, 2355, 2364, 2366, 8197, 9985, 9989, 9990, 9991, 9992, 9993, 9994,
+   9995, 9996, 9997, 9999, 10000, 10005, 10006, 10009, 10010, 10012, 10013, 10014, 10015, 10016,
+   10017, 10021, 10022, 10024, 10025, 10026, 10030, 10031, 10032, 10033, 10035, 10037, 10038,
+   10039, 10040, 10041, 10042, 10043, 10044, 10045, 10046, 10047, 10049, 10052, 10053, 10054,
+   10055, 10056, 10057, 10058, 10059, 10061, 10062, 10063, 10064, 10065, 10066, 10067, 10068,
+   10069, 10070, 10071, 10072, 10073, 10074, 10075, 10076, 10078, 10079, 10080, 10081, 10082,
+   10083, 19464, 19468.
+
 The filter uses ids only, never category names, so it works in every UI language. The ranges
 and exceptions are what both measured versions have; a later version may add commands in or
 next to a range (section 9).
@@ -106,7 +123,9 @@ next to a range (section 9).
 - **Disabled commands are greyed out (D3).** D3 was decided but never drawn: today `enabled` is
   stored and checked only at run time, and a disabled command looks like any other row. Drawing
   it is part of this change. *(My call:)* a grey row can be selected like any row; Enter or a
-  click on it runs nothing and shows the refused line (4.4).
+  click on it runs nothing and shows the refused line (4.4). *(Manual check 2026-11-13:)* on the
+  blue selection bar a disabled row looked like an enabled one, so a selected disabled row gets a
+  neutral selection bar (the palette's divider colour) with muted text instead of the blue bar.
 - Built-in tools rank above commands (D4); this keeps its current implementation.
 
 ### 4.4 Running
