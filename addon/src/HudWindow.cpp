@@ -377,18 +377,21 @@ struct ResultRowStyle {
     const SolidBrush& selText;
     const SolidBrush& selTag;
     const SolidBrush& selBackground;
+    const SolidBrush& neutralBackground;
 };
 
 // Title on the left, chord or category right-aligned in muted text, like shortcuts in
-// Archicad's menus. Disabled commands are greyed so the user sees they will not run.
+// Archicad's menus. Disabled commands are greyed so the user sees they will not run; when
+// selected they get a neutral bar and muted text, so the blue bar does not read as "will run".
 static void DrawResultRow(Graphics& g, const SearchItem& item, bool isSelected, float y, float width,
                           const ResultRowStyle& style) {
     const float scale = style.scale;
     const float rowH = kRowH * scale;
     const float padX = kPadX * scale;
 
+    const bool neutralBar = isSelected && !item.enabled;
     if (isSelected) {
-        FillRoundedRect(g, style.selBackground, nullptr,
+        FillRoundedRect(g, neutralBar ? style.neutralBackground : style.selBackground, nullptr,
                         RectF(4.0f * scale, y + 1.0f * scale, width - 8.0f * scale, rowH - 2.0f * scale), 3.0f * scale);
     }
 
@@ -399,11 +402,11 @@ static void DrawResultRow(Graphics& g, const SearchItem& item, bool isSelected, 
     const float tagW = std::clamp(measured.Width + padX, 90.0f * scale, 0.4f * width);
 
     const SolidBrush* titleBrush = isSelected ? &style.selText : &style.text;
-    if (!item.enabled) titleBrush = isSelected ? &style.selTag : &style.muted;
+    if (!item.enabled) titleBrush = &style.muted;
     g.DrawString(item.title.c_str(), -1, style.fonts.row.get(),
                  RectF(padX, y, width - padX - tagW, rowH), &style.left, titleBrush);
     g.DrawString(item.tag.c_str(), -1, style.fonts.hint.get(),
-                 RectF(width - tagW, y, tagW - padX, rowH), &style.right, isSelected ? &style.selTag : &style.muted);
+                 RectF(width - tagW, y, tagW - padX, rowH), &style.right, isSelected && !neutralBar ? &style.selTag : &style.muted);
 }
 
 void HudWindow::Render() {
@@ -448,6 +451,7 @@ void HudWindow::Render() {
         SolidBrush selTextBrush(pal.selectedText);
         SolidBrush selTagBrush(WithAlpha(pal.selectedText, 200));
         SolidBrush selBrush(pal.selectedBackground);
+        SolidBrush neutralBrush(pal.divider);
 
         // 2. Search field
         const RectF searchRect(padX, 0.0f, width - 2 * padX, searchH);
@@ -467,7 +471,7 @@ void HudWindow::Render() {
 
         // 4. Result rows
         const float listY = searchH + hintH;
-        const ResultRowStyle rowStyle{ s_scale, fonts, formatLeft, formatRight, textBrush, mutedBrush, selTextBrush, selTagBrush, selBrush };
+        const ResultRowStyle rowStyle{ s_scale, fonts, formatLeft, formatRight, textBrush, mutedBrush, selTextBrush, selTagBrush, selBrush, neutralBrush };
         for (size_t i = 0; i < s_results.size(); ++i) {
             DrawResultRow(g, s_results[i], i == s_selectedIndex, listY + i * rowH, static_cast<float>(width), rowStyle);
         }

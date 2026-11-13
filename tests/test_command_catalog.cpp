@@ -41,6 +41,29 @@ void TestFilterRanges() {
     std::cout << "[PASS] TestFilterRanges\n";
 }
 
+void TestDrawingContextMenuGroupIsDropped() {
+    // Archicad's own "Individuelles Kontext-Menue" group: acts on context the user does not see
+    const unsigned long dropped[] = {
+        2339ul, 2340ul, 2341ul, 2344ul, 2345ul, 2355ul, 2364ul, 2366ul, 8197ul, 9985ul, 9989ul,
+        9990ul, 9991ul, 9992ul, 9993ul, 9994ul, 9995ul, 9996ul, 9997ul, 9999ul, 10000ul, 10005ul,
+        10006ul, 10009ul, 10010ul, 10012ul, 10013ul, 10014ul, 10015ul, 10016ul, 10017ul, 10021ul,
+        10022ul, 10024ul, 10025ul, 10026ul, 10030ul, 10031ul, 10032ul, 10033ul, 10035ul, 10037ul,
+        10038ul, 10039ul, 10040ul, 10041ul, 10042ul, 10043ul, 10044ul, 10045ul, 10046ul, 10047ul,
+        10049ul, 10052ul, 10053ul, 10054ul, 10055ul, 10056ul, 10057ul, 10058ul, 10059ul, 10061ul,
+        10062ul, 10063ul, 10064ul, 10065ul, 10066ul, 10067ul, 10068ul, 10069ul, 10070ul, 10071ul,
+        10072ul, 10073ul, 10074ul, 10075ul, 10076ul, 10078ul, 10079ul, 10080ul, 10081ul, 10082ul,
+        10083ul, 19464ul, 19468ul,
+    };
+    for (unsigned long id : dropped)
+        assert(!CommandCatalog::IsOffered(Entry(id)));
+    // Ids next to the group are real commands
+    for (unsigned long id : { 2338ul, 2342ul, 8196ul, 8198ul, 9984ul, 9986ul, 10084ul, 19463ul, 19465ul, 19469ul })
+        assert(CommandCatalog::IsOffered(Entry(id)));
+    // An add-on's id may collide with the group
+    assert(CommandCatalog::IsOffered(Entry(9994, 1, 2)));
+    std::cout << "[PASS] TestDrawingContextMenuGroupIsDropped\n";
+}
+
 void TestCategoryLabel() {
     assert(CommandCatalog::CategoryLabel(L"04 Ausschnitt") == L"Ausschnitt");
     assert(CommandCatalog::CategoryLabel(L"12 Werkzeuge") == L"Werkzeuge");
@@ -93,6 +116,7 @@ int main() {
     TestOfferedPlainCommand();
     TestInvisibleAndUnnamedAreDropped();
     TestFilterRanges();
+    TestDrawingContextMenuGroupIsDropped();
     TestCategoryLabel();
     TestMakeItemsMapsAndFilters();
     TestRunnableNeedsSameKeyOfferedAndEnabled();
