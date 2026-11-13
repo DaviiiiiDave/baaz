@@ -228,6 +228,21 @@ void TestWhitespaceOnlyQueryReturnsNothing() {
     std::cout << "[PASS] TestWhitespaceOnlyQueryReturnsNothing\n";
 }
 
+void TestToolRanksAboveCommandWithSameName() {
+    SearchEngine::Initialize();
+    SearchItem command;
+    command.title = L"Wall Tool";
+    command.tag = L"Entwurf";
+    command.kind = ItemKind::Command;
+    SearchEngine::SetProjectItems({ command });
+    const auto results = SearchEngine::Query(L"wall tool");
+    assert(!results.empty() && results[0].kind == ItemKind::Tool);
+    bool commandListed = false;
+    for (const auto& r : results) commandListed = commandListed || r.kind == ItemKind::Command;
+    assert(commandListed);
+    std::cout << "[PASS] TestToolRanksAboveCommandWithSameName\n";
+}
+
 int main() {
     std::cout << "Running Native Archicad Search Engine Unit Tests...\n";
     TestEmptyQuery();
@@ -242,6 +257,7 @@ int main() {
     TestFavoriteFoundByWords();
     TestWhitespacePaddedChordKeepsExactChordRank();
     TestWhitespaceOnlyQueryReturnsNothing();
-    std::cout << "\nALL 12 SEARCH ENGINE NATIVE TESTS PASSED!\n";
+    TestToolRanksAboveCommandWithSameName();
+    std::cout << "\nALL 13 SEARCH ENGINE NATIVE TESTS PASSED!\n";
     return 0;
 }

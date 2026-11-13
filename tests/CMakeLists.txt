@@ -63,3 +63,12 @@ add_executable(test_command_hint
 target_include_directories(test_command_hint PRIVATE ../addon/include)
 target_compile_definitions(test_command_hint PRIVATE UNICODE _UNICODE)
 add_test(NAME CommandHint COMMAND test_command_hint)
+
+# Filter and labels for the rows of Archicad's command table; no Archicad API
+add_executable(test_command_catalog
+    test_command_catalog.cpp
+    ../addon/src/CommandCatalog.cpp
+)
+target_include_directories(test_command_catalog PRIVATE ../addon/include)
+target_compile_definitions(test_command_catalog PRIVATE UNICODE _UNICODE)
+add_test(NAME CommandCatalog COMMAND test_command_catalog)

@@ -17,7 +17,10 @@ struct SearchItem {
     double score = 0.0;
     std::vector<int> menuPosition;  // Command: path through the live menu bar, including the item's own index
     unsigned liveId = 0;            // Command: the id the live menu item had when it was linked
-    bool enabled = true;            // Command: false when the live item was greyed out
+    unsigned long commandId = 0;    // Command: key in Archicad's command table
+    unsigned long developerId = 0;
+    unsigned long productId = 0;
+    bool enabled = true;            // Command: false when Archicad reports it disabled
 };
 
 class SearchEngine {
