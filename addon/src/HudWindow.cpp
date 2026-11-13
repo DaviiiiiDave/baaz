@@ -1,7 +1,6 @@
 #include "HudWindow.hpp"
-#include "BaazAddon.hpp"
 #include "CommandExecutor.hpp"
-#include "CommandSource.hpp"
+#include "CommandCatalog.hpp"
 #include "NavigatorIndexer.hpp"
 #include <windowsx.h>
 #include <gdiplus.h>
@@ -25,13 +24,10 @@ std::wstring HudWindow::s_query;
 std::vector<SearchItem> HudWindow::s_results;
 size_t HudWindow::s_selectedIndex = 0;
 SearchItem HudWindow::s_pendingItem;
-// Ready until the first index refresh arrives, so a fresh HUD does not flash a hint
-CommandState HudWindow::s_commandState = CommandState::Ready;
-size_t HudWindow::s_notSearchable = 0;
-SearchItem HudWindow::s_workEnvironment;
+// Readable until the first index refresh arrives, so a fresh HUD does not flash a hint
+bool HudWindow::s_commandsReadable = true;
 bool HudWindow::s_runRefused = false;
 HintRow HudWindow::s_hint;
-bool HudWindow::s_hintSelected = false;
 RECT HudWindow::s_rect = {};
 float HudWindow::s_scale = 1.0f;
 
@@ -185,21 +181,15 @@ static float HintBlockHeight(const HintRow& hint) {
     return kRowH + hint.guide.size() * kGuideH;
 }
 
-// The title is selectable like a result; the guide below it is plain muted text
-static void DrawHint(Graphics& g, const HintRow& hint, bool selected, float y, float width, float scale,
+// The title and the guide below it are plain text; none of it can be selected or run
+static void DrawHint(Graphics& g, const HintRow& hint, float y, float width, float scale,
                      const StringFormat& format) {
     const HudFonts& fonts = FontsForScale(scale);
     const float padX = kPadX * scale;
     const float rowH = kRowH * scale;
     SolidBrush textBrush(s_palette.text);
     SolidBrush mutedBrush(s_palette.mutedText);
-    SolidBrush selTextBrush(s_palette.selectedText);
-    SolidBrush selBrush(s_palette.selectedBackground);
-    if (selected) {
-        FillRoundedRect(g, selBrush, nullptr, RectF(4.0f * scale, y + 1.0f * scale, width - 8.0f * scale, rowH - 2.0f * scale), 3.0f * scale);
-    }
-    g.DrawString(hint.title.c_str(), -1, fonts.row.get(), RectF(padX, y, width - 2 * padX, rowH), &format,
-                 selected ? &selTextBrush : &textBrush);
+    g.DrawString(hint.title.c_str(), -1, fonts.row.get(), RectF(padX, y, width - 2 * padX, rowH), &format, &textBrush);
     for (size_t i = 0; i < hint.guide.size(); ++i) {
         g.DrawString(hint.guide[i].c_str(), -1, fonts.hint.get(),
                      RectF(padX, y + rowH + i * kGuideH * scale, width - 2 * padX, kGuideH * scale), &format, &mutedBrush);
@@ -267,19 +257,16 @@ void HudWindow::SetQuery(std::wstring query) {
     s_query = std::move(query);
     s_results = SearchEngine::Query(s_query);
     s_selectedIndex = 0;
-    s_hintSelected = false;
     Reposition();
     Render();
 }
 
 void HudWindow::RebuildHint() {
-    s_hint = MakeHintRow(s_commandState, s_notSearchable, s_workEnvironment.liveId != 0, s_runRefused);
+    s_hint = MakeHintRow(s_commandsReadable, s_runRefused);
 }
 
-void HudWindow::ApplyCommandIndex(const CommandIndex& index) {
-    s_commandState = index.state;
-    s_notSearchable = index.notSearchable;
-    s_workEnvironment = index.workEnvironment;
+void HudWindow::ApplyCommandsReadable(bool readable) {
+    s_commandsReadable = readable;
     RebuildHint();
     if (s_visible) SetQuery(s_query);
 }
@@ -303,15 +290,10 @@ void HudWindow::Hide() {
 }
 
 void HudWindow::ExecuteSelection() {
-    // A hint that cannot open Work Environment has nothing to run; the HUD stays open
-    if (s_hintSelected && !s_hint.canOpenWorkEnvironment) return;
-    const SearchItem* chosen = nullptr;
-    if (s_hintSelected) chosen = &s_workEnvironment;
-    else if (s_selectedIndex < s_results.size()) chosen = &s_results[s_selectedIndex];
-    if (chosen != nullptr) {
+    if (s_selectedIndex < s_results.size()) {
         // Run the command from our window's message, not from inside the keyboard
         // hook: Archicad refuses window and view changes made from within a hook.
-        s_pendingItem = *chosen;
+        s_pendingItem = s_results[s_selectedIndex];
         PostMessageW(s_hWnd, WM_BAAZ_EXECUTE, 0, 0);
     }
     Hide();
@@ -322,42 +304,19 @@ void HudWindow::ClickAt(float y) {
     if (!s_visible) return;
     const float searchH = kSearchH * s_scale;
     const float hintH = HintBlockHeight(s_hint) * s_scale;
-    if (y < searchH) return;
-    if (y < searchH + hintH) {
-        if (s_hint.canOpenWorkEnvironment) {
-            s_hintSelected = true;
-            ExecuteSelection();
-        }
-        return;
-    }
+    if (y < searchH + hintH) return;
     const size_t idx = static_cast<size_t>((y - searchH - hintH) / (kRowH * s_scale));
     if (idx < s_results.size()) {
-        s_hintSelected = false;
         s_selectedIndex = idx;
         ExecuteSelection();
     }
 }
 
-// Up from the first result reaches the hint row above it
 void HudWindow::MoveUp() {
-    if (s_hintSelected) return;
     if (s_selectedIndex > 0) {
         --s_selectedIndex;
         Render();
-    } else if (!s_hint.title.empty()) {
-        s_hintSelected = true;
-        Render();
     }
-}
-
-// Down and Tab on the hint row go back to the results, if there are any; true if the hint row was selected
-bool HudWindow::LeaveHint() {
-    if (!s_hintSelected) return false;
-    if (!s_results.empty()) {
-        s_hintSelected = false;
-        Render();
-    }
-    return true;
 }
 
 void HudWindow::HandleKey(WPARAM vk, WCHAR ch) {
@@ -371,13 +330,12 @@ void HudWindow::HandleKey(WPARAM vk, WCHAR ch) {
     case VK_SPACE:
         // Shift+Space always types a space. Plain Space on an empty search closes
         // the HUD (tap to open, tap to close); otherwise it executes like Enter,
-        // except while nothing matches or on the hint row (which never runs on
-        // Space), where it types a literal space for multi-word searches.
+        // except while nothing matches, where it types a literal space for multi-word searches.
         if (GetKeyState(VK_SHIFT) & 0x8000) {
             SetQuery(s_query + L' ');
         } else if (s_query.empty()) {
             Hide();
-        } else if (s_results.empty() || s_hintSelected) {
+        } else if (s_results.empty()) {
             SetQuery(s_query + L' ');
         } else {
             ExecuteSelection();
@@ -387,14 +345,12 @@ void HudWindow::HandleKey(WPARAM vk, WCHAR ch) {
         MoveUp();
         break;
     case VK_DOWN:
-        if (LeaveHint()) break;
         if (s_selectedIndex + 1 < s_results.size()) {
             ++s_selectedIndex;
             Render();
         }
         break;
     case VK_TAB:
-        if (LeaveHint()) break;
         if (!s_results.empty()) {
             s_selectedIndex = (s_selectedIndex + 1) % s_results.size();
             Render();
@@ -466,14 +422,14 @@ void HudWindow::Render() {
 
         // 3. Hint row, pinned above the results
         const float hintH = HintBlockHeight(s_hint) * s_scale;
-        if (hintH > 0.0f) DrawHint(g, s_hint, s_hintSelected, searchH, static_cast<float>(width), s_scale, formatLeft);
+        if (hintH > 0.0f) DrawHint(g, s_hint, searchH, static_cast<float>(width), s_scale, formatLeft);
 
         // 4. Result rows: title on the left, chord or item kind right-aligned
         // in muted text, like shortcuts in Archicad's menus
         const float listY = searchH + hintH;
         for (size_t i = 0; i < s_results.size(); ++i) {
             const float y = listY + i * rowH;
-            const bool isSelected = (i == s_selectedIndex) && !s_hintSelected;
+            const bool isSelected = (i == s_selectedIndex);
 
             if (isSelected) {
                 FillRoundedRect(g, selBrush, nullptr, RectF(4.0f * s_scale, y + 1.0f * s_scale, width - 8.0f * s_scale, rowH - 2.0f * s_scale), 3.0f * s_scale);
@@ -518,15 +474,16 @@ LRESULT CALLBACK HudWindow::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM 
         std::vector<SearchItem> items = NavigatorIndexer::BuildProjectIndex();
         // An exception must not leave the window procedure; the project items are still offered,
         // and the commands count as unreadable
-        CommandIndex commands;
+        bool readable = false;
         try {
-            commands = CommandSource::BuildCommandIndex(MainWindow(), {});
-            items.insert(items.end(), commands.commands.begin(), commands.commands.end());
+            const std::vector<SearchItem> commands = CommandCatalog::MakeItems(NavigatorIndexer::ReadCommandTable());
+            readable = !commands.empty();
+            items.insert(items.end(), commands.begin(), commands.end());
         } catch (...) {
-            commands = CommandIndex();
+            readable = false;
         }
         SearchEngine::SetProjectItems(std::move(items));
-        ApplyCommandIndex(commands);
+        HudWindow::ApplyCommandsReadable(readable);
         return 0;
     }
 

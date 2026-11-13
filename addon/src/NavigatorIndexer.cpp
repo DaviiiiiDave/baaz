@@ -4,6 +4,7 @@
 #include "APIEnvir.h"
 #include "ACAPinc.h"
 #include "ACAPI/Favorite.hpp"
+#include "DGCommandDescriptor.hpp"
 #endif
 
 namespace Baaz {
@@ -128,6 +129,33 @@ static void CollectFavorites(std::vector<SearchItem>& items) {
     }
 }
 
+// The name getter changed between DevKits: AC 29 has only the text without '&'
+static std::wstring CommandName(const DG::CommandDescriptor& descriptor) {
+#if ACAPI_VERSION >= 30
+    return ToWString(descriptor.GetDisplayText());
+#else
+    return ToWString(descriptor.GetCleanText());
+#endif
+}
+
+std::vector<CommandEntry> NavigatorIndexer::ReadCommandTable() {
+    std::vector<CommandEntry> table;
+    const DG::CommandTable& commands = DG::CommandDescriptor::GetCommandTable();
+    commands.Enumerate([&](const DG::Command& command, DG::CommandDescriptor* const& descriptor) {
+        if (descriptor == nullptr) return;
+        CommandEntry entry;
+        entry.commandId = command.GetCommandId();
+        entry.developerId = command.GetDeveloperId();
+        entry.productId = command.GetProductId();
+        entry.name = CommandName(*descriptor);
+        entry.category = ToWString(descriptor->GetCategory());
+        entry.visible = descriptor->IsVisible();
+        entry.enabled = descriptor->IsEnabled();
+        table.push_back(std::move(entry));
+    });
+    return table;
+}
+
 bool NavigatorIndexer::HasOpenProject() {
     API_ProjectInfo projectInfo = {};
     return (ACAPI_ProjectOperation_Project(&projectInfo) == NoError);
@@ -146,6 +174,7 @@ std::vector<SearchItem> NavigatorIndexer::BuildProjectIndex() {
 
 // Without Archicad (tests) a project is always open and has no items
 bool NavigatorIndexer::HasOpenProject() { return true; }
+std::vector<CommandEntry> NavigatorIndexer::ReadCommandTable() { return {}; }
 std::vector<SearchItem> NavigatorIndexer::BuildProjectIndex() { return {}; }
 
 #endif

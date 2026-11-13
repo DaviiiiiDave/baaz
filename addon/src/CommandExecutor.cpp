@@ -1,5 +1,6 @@
 #include "CommandExecutor.hpp"
-#include "CommandSource.hpp"
+#include "CommandCatalog.hpp"
+#include "NavigatorIndexer.hpp"
 #include "SettingsDialog.hpp"
 #include "BaazAddon.hpp"
 
@@ -7,6 +8,8 @@
 #include "APIEnvir.h"
 #include "ACAPinc.h"
 #include "ACAPI/Favorite.hpp"
+#include "DGApplication.hpp"
+#include "DGCommandDescriptor.hpp"
 #else
 #include <cwctype>
 #endif
@@ -63,6 +66,19 @@ static bool ApplyFavorite(const SearchItem& item) {
     return SetTool(item);
 }
 
+// Posts the command to Archicad's own queue, as its menus and shortcuts do. The table is re-read because a
+// row can disappear or become disabled between indexing and running it.
+static bool RunCommand(const SearchItem& item) {
+    try {
+        if (!CommandCatalog::IsRunnable(NavigatorIndexer::ReadCommandTable(), item)) return false;
+        DG::Application* application = DG::Application::GetInstance();
+        return application != nullptr &&
+               application->PostCommandMessage(DG::Command(item.commandId, item.developerId, item.productId));
+    } catch (...) {
+        return false;
+    }
+}
+
 #else
 
 // Without Archicad (tests): "select" a tool by typing its chord
@@ -82,6 +98,8 @@ static bool GoToView(const SearchItem&) { return true; }
 static bool GoToLayout(const SearchItem&) { return true; }
 static bool SetLayerCombo(const SearchItem&) { return true; }
 static bool ApplyFavorite(const SearchItem&) { return true; }
+// No command table without Archicad: nothing can run
+static bool RunCommand(const SearchItem&) { return false; }
 
 #endif
 
@@ -104,7 +122,7 @@ bool CommandExecutor::Execute(const SearchItem& item) {
         SettingsDialog::Show(MainWindow());
         return true;
     case ItemKind::Command:
-        s_refusedRun = !CommandSource::Run(item, MainWindow());
+        s_refusedRun = !RunCommand(item);
         return !s_refusedRun;
     case ItemKind::Help:
         return true;
