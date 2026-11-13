@@ -18,8 +18,7 @@ using namespace Baaz;
 
 namespace Baaz {
 HINSTANCE AddonInstance() { return GetModuleHandleW(NULL); }
-HWND g_frame = NULL;
-HWND MainWindow() { return g_frame; }
+HWND MainWindow() { return NULL; }
 }
 
 static std::vector<INPUT> g_sent;
@@ -602,7 +601,7 @@ static void HudReopensAfterRunningCommand(bool peek) {
 }
 
 // --- Hint row ----------------------------------------------------------------
-// Without a frame window the commands cannot be read, so the HUD shows the hint for that state.
+// Without the Archicad API the command table reads as empty, so the HUD shows the hint for that state.
 
 // The index refresh of a fresh HUD is pumped first, so it cannot replace what a test applies afterwards
 static void OpenHud(bool peek) {
@@ -681,7 +680,7 @@ static bool HintMentionsRefusedRun() {
 
 static void RefusedRunIsShownOnce(bool peek) {
     SearchItem item;
-    item.kind = ItemKind::Command;   // nothing to run in: no frame window
+    item.kind = ItemKind::Command;   // the executor refuses every command without the Archicad API
     CHECK(!CommandExecutor::Execute(item));
     OpenHud(peek);
     CHECK(HintMentionsRefusedRun());

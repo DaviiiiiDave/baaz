@@ -9,7 +9,6 @@
 #include "ACAPinc.h"
 #include "ACAPI/Favorite.hpp"
 #include "DGApplication.hpp"
-#include "DGCommandDescriptor.hpp"
 #else
 #include <cwctype>
 #endif

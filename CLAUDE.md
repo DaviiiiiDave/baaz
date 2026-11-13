@@ -18,12 +18,9 @@ Every change must follow the rules in [REVIEW.md](REVIEW.md). They are imported 
 | `addon/src/MessageHook.cpp` | Thread hooks: Space tap vs hold, Magic Wand replay, keys while the HUD is open. |
 | `addon/src/HudWindow.cpp` | The layered, focusless search window and its key handling. |
 | `addon/src/SearchEngine.cpp` | Tool table, chords, ranking and the `?` cheatsheet. |
-| `addon/src/NavigatorIndexer.cpp` | Views, layouts and layer combinations of the open project. |
-| `addon/src/CommandExecutor.cpp` | Runs a result: tool, view, layout, layer combination, settings. |
-| `addon/src/SchemeReader.cpp` | Reads an exported command-layout scheme (XML) into a menu tree; no Archicad API. |
-| `addon/src/BinSchemeReader.cpp` | Reads the binary command scheme Archicad keeps current (`.bin`) into a menu tree; no Archicad API. |
-| `addon/src/MenuLink.cpp` | Links the names of a menu tree to the positions in the live menu bar; no Archicad API. |
-| `addon/src/CommandSource.cpp` | Win32 menu bar (`LiveMenu`), finds the scheme `.bin` files, the profile in use and the exports, picks the scheme and the names, runs a command by `WM_COMMAND`; no Archicad API. |
+| `addon/src/CommandCatalog.cpp` | Which commands of Archicad's command table are offered and may run, and their labels; no Archicad API. |
+| `addon/src/NavigatorIndexer.cpp` | Views, layouts and layer combinations of the open project and Archicad's command table. |
+| `addon/src/CommandExecutor.cpp` | Runs a result: tool, view, layout, layer combination, settings, Archicad commands. |
 | `addon/src/Settings.cpp`, `SettingsDialog.cpp` | `%USERPROFILE%\.baaz\config.json` and its dialog. |
 | `addon/resources/` | `RINT/AddOn.grc` (name), `RFIX/AddOnFix.grc` (MDID), `RFIX.win/AddOnMain.rc2`. |
 | `tests/` | Native tests, built without the Archicad API. `test_sendinput_stub.hpp` records synthesized keys. |

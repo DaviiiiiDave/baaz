@@ -15,8 +15,6 @@ struct SearchItem {
     int toolType = 0;        // API_ElemTypeID and API_ElemVariationID of a tool
     int toolVariation = 0;
     double score = 0.0;
-    std::vector<int> menuPosition;  // Command: path through the live menu bar, including the item's own index
-    unsigned liveId = 0;            // Command: the id the live menu item had when it was linked
     unsigned long commandId = 0;    // Command: key in Archicad's command table
     unsigned long developerId = 0;
     unsigned long productId = 0;
