@@ -32,6 +32,7 @@ static int g_failures = 0;
 static HWND g_main = NULL;
 static HWND g_edit = NULL;
 static HWND g_dgRichEdit = NULL;
+static HWND g_browserView = NULL;
 
 UINT WINAPI TestSendInput(UINT cInputs, LPINPUT pInputs, int /*cbSize*/) {
     if (g_failMouseInput && cInputs > 0 && pInputs[0].type == INPUT_MOUSE) return 0;  // as if the system refused it
@@ -453,6 +454,16 @@ static void DgRichEditKeepsTheSpace(bool peek) {
     CHECK(WandPresses() == 0);
 }
 
+// An add-on HTML palette draws its own text fields inside a DG browser, with no Win32 caret
+static void BrowserPaletteKeepsTheSpace(bool peek) {
+    SetFocus(g_browserView);
+    Tap(VK_SPACE, peek);
+    CHECK(!HudWindow::IsVisible());
+    CHECK(DeliveredSpaces() == 2);
+    PumpFor(450, peek);
+    CHECK(WandPresses() == 0);
+}
+
 static void ModalDialogGetsTheSpace(bool peek) {
     EnableWindow(g_main, FALSE);
     Tap(VK_SPACE, peek);
@@ -803,6 +814,13 @@ int main() {
     dgClass.lpszClassName = L"DGUniRichEditClass";
     RegisterClassW(&dgClass);
     g_dgRichEdit = CreateWindowExW(0, dgClass.lpszClassName, L"", WS_CHILD | WS_VISIBLE, 0, 30, 100, 20, g_main, NULL, hInst, NULL);
+    WNDCLASSW browserClass = {};
+    browserClass.lpfnWndProc = DefWindowProcW;
+    browserClass.hInstance = hInst;
+    browserClass.lpszClassName = L"DGBrowserClass";
+    RegisterClassW(&browserClass);
+    HWND browser = CreateWindowExW(0, browserClass.lpszClassName, L"", WS_CHILD | WS_VISIBLE, 0, 60, 100, 40, g_main, NULL, hInst, NULL);
+    g_browserView = CreateWindowExW(0, wc.lpszClassName, L"", WS_CHILD | WS_VISIBLE, 0, 0, 100, 40, browser, NULL, hInst, NULL);
     ShowWindow(g_main, SW_SHOWNOACTIVATE);
 
     SearchEngine::Initialize();
@@ -840,6 +858,7 @@ int main() {
         Run("The other button's release is delivered", ReleaseOfTheOtherButtonIsDelivered, peek);
         Run("Text field keeps the space", TextFieldGetsTheSpace, peek);
         Run("DG rich edit keeps the space", DgRichEditKeepsTheSpace, peek);
+        Run("HTML palette keeps the space", BrowserPaletteKeepsTheSpace, peek);
         Run("Modal dialog keeps the space", ModalDialogGetsTheSpace, peek);
         Run("Lost keyup, then tap", LostKeyUpThenTap, peek);
         Run("Typing does not double letters", TypingDoesNotDoubleLetters, peek);
