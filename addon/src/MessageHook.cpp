@@ -72,6 +72,16 @@ static bool IsTextEditingActive(HWND hFocused) {
     return isEditClass && !(GetWindowLongPtrW(hFocused, GWL_STYLE) & ES_READONLY);
 }
 
+// An add-on HTML palette draws its own text fields inside a DG browser; Windows
+// sees neither an edit class nor a caret there, so the whole palette keeps Space
+static bool IsInBrowserPalette(HWND hFocused) {
+    wchar_t cls[64] = {0};
+    for (HWND h = hFocused; h; h = GetParent(h)) {
+        if (GetClassNameW(h, cls, 63) != 0 && _wcsicmp(cls, L"DGBrowserClass") == 0) return true;
+    }
+    return false;
+}
+
 bool MessageHook::Install(HWND hMainWnd) {
     s_hMainWnd = hMainWnd;
     DWORD threadId = GetCurrentThreadId();
@@ -89,8 +99,9 @@ void MessageHook::Uninstall() {
 }
 
 bool MessageHook::CanSummonHud() {
+    HWND hFocused = GetFocus();
     // A disabled main window means a modal dialog is open
-    return !IsTextEditingActive(GetFocus()) &&
+    return !IsTextEditingActive(hFocused) && !IsInBrowserPalette(hFocused) &&
            !(s_hMainWnd && !IsWindowEnabled(s_hMainWnd)) &&
            NavigatorIndexer::HasOpenProject();
 }
